@@ -30,7 +30,7 @@ Store: MySQL (database logis per layanan) + Redis (cache).
 
 ```
 Final_Project_Scalable/
-├── gateway/                 # Nginx: nginx.conf + conf.d/default.conf
+├── gateway/                 # Nginx: nginx.conf + templates/default.conf.template
 ├── services/                # satu folder per layanan (Dockerfile + app/)
 │   ├── auth/                #   Ardi
 │   ├── poem/                #   Satya
