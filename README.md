@@ -14,7 +14,7 @@ Tujuh layanan di balik satu gerbang Nginx:
 
 | Layanan | Peran | Pemilik |
 |---|---|---|
-| `gateway` (Nginx) | Pintu masuk tunggal, static, rate limit, X-Request-ID | Lindra |
+| `gateway` (Nginx) | Pintu masuk tunggal, static, rate limit, X-Request-ID | Anders |
 | `auth` | Register/login, terbitkan JWT | Ardi |
 | `poem` | CRUD puisi, publish event, cache baca | Satya |
 | `nlp-worker` | Pipeline NLP → `poem.analyzed` | Satya |
@@ -30,7 +30,7 @@ Store: MySQL (database logis per layanan) + Redis (cache).
 
 ```
 Final_Project_Scalable/
-├── gateway/                 # Nginx: nginx.conf + conf.d/default.conf
+├── gateway/                 # Nginx: nginx.conf + templates/default.conf.template
 ├── services/                # satu folder per layanan (Dockerfile + app/)
 │   ├── auth/                #   Ardi
 │   ├── poem/                #   Satya

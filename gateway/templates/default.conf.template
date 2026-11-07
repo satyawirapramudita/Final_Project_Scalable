@@ -1,0 +1,154 @@
+# ─────────────────────────────────────────────────────────────
+# Gerbang tunggal: routing /api/* ke layanan + frontend statis.
+# Pemilik: Anders.
+#
+# File ini adalah TEMPLATE. Image nginx merendernya ke
+# /etc/nginx/conf.d/default.conf dan mengganti ${API_*} dari environment
+# (lihat docker-compose.yml dan .env.example). Variabel nginx seperti
+# $host tidak tersentuh karena NGINX_ENVSUBST_FILTER hanya memilih API_*.
+# ─────────────────────────────────────────────────────────────
+
+# Rate limit per IP klien. Naikkan API_RATE_LIMIT saat uji beban, karena
+# generator beban biasanya berasal dari satu IP.
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=${API_RATE_LIMIT};
+limit_req_status 429;
+
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    client_max_body_size 1m;
+
+    # Alamat layanan di-resolve saat request (lewat DNS Docker), bukan saat
+    # nginx start. Akibatnya: gateway tetap hidup bila sebuah layanan mati
+    # (hasilnya 502 JSON, bukan crash), container yang di-recreate dengan IP
+    # baru langsung terjangkau, dan replika hasil --scale ikut terpakai.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $auth_svc      http://auth:8001;
+    set $poem_svc      http://poem:8002;
+    set $wordcloud_svc http://wordcloud:8003;
+    set $search_svc    http://search:8004;
+    set $wiki_svc      http://wiki-linker:8005;
+    set $tts_svc       http://tts:8006;
+
+    # Header korelasi untuk seluruh request (dipakai lintas layanan)
+    proxy_http_version 1.1;
+    proxy_set_header Connection        "";
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Request-ID      $request_id;
+
+    # Gagal cepat agar worker tidak menumpuk saat layanan lambat atau mati.
+    proxy_connect_timeout 3s;
+    proxy_send_timeout    30s;
+    proxy_read_timeout    30s;
+
+    # Kembalikan ID request ke klien (berguna untuk melacak log lintas layanan).
+    add_header X-Request-ID           $request_id always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options        SAMEORIGIN always;
+    add_header Referrer-Policy        strict-origin-when-cross-origin always;
+
+    # ── Error buatan gateway dalam bentuk JSON ──
+    # (respons error dari layanan sendiri diteruskan apa adanya)
+    error_page 429 @err_429;
+    error_page 502 @err_502;
+    error_page 503 @err_503;
+    error_page 504 @err_504;
+
+    location @err_429 {
+        default_type application/json;
+        return 429 '{"ok":false,"detail":"Terlalu banyak request, coba lagi sebentar"}';
+    }
+    location @err_502 {
+        default_type application/json;
+        return 502 '{"ok":false,"detail":"Layanan tidak tersedia"}';
+    }
+    location @err_503 {
+        default_type application/json;
+        return 503 '{"ok":false,"detail":"Layanan sedang sibuk"}';
+    }
+    location @err_504 {
+        default_type application/json;
+        return 504 '{"ok":false,"detail":"Layanan tidak merespons tepat waktu"}';
+    }
+
+    # ── Kesehatan gateway ──
+    location = /health {
+        access_log off;
+        default_type application/json;
+        return 200 '{"status":"ok","service":"gateway"}';
+    }
+
+    # ── Frontend statis ──
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location ~* \.(?:css|js|svg|png|jpe?g|gif|ico|woff2?)$ {
+        expires 5m;
+        try_files $uri =404;
+    }
+
+    # ── API ──
+    # `^~` membuat prefix API menang atas location regex di atas.
+    # proxy_pass tanpa path: URI asli (termasuk query string) diteruskan utuh,
+    # mis. /api/auth/register tetap /api/auth/register di layanan auth.
+    location ^~ /api/auth/ {
+        limit_req zone=api_limit burst=${API_BURST} nodelay;
+        proxy_pass $auth_svc;
+    }
+
+    location ^~ /api/poems {
+        limit_req zone=api_limit burst=${API_BURST} nodelay;
+        proxy_pass $poem_svc;
+    }
+
+    location ^~ /api/wordcloud/ {
+        limit_req zone=api_limit burst=${API_BURST} nodelay;
+        proxy_pass $wordcloud_svc;
+    }
+
+    location ^~ /api/search {
+        limit_req zone=api_limit burst=${API_BURST} nodelay;
+        proxy_pass $search_svc;
+    }
+
+    location ^~ /api/wiki/ {
+        limit_req zone=api_limit burst=${API_BURST} nodelay;
+        proxy_pass $wiki_svc;
+    }
+
+    location ^~ /api/tts/ {
+        limit_req zone=api_limit burst=${API_BURST} nodelay;
+        proxy_pass $tts_svc;
+    }
+
+    # Path /api lain yang tidak dikenal: JSON 404, bukan index.html.
+    location ^~ /api {
+        default_type application/json;
+        return 404 '{"ok":false,"detail":"Endpoint tidak dikenal"}';
+    }
+
+    # ── Blokir akses internal dari luar ──
+    location ^~ /internal/ {
+        return 404;
+    }
+}
+
+# Metrik dasar nginx. Port 8081 tidak dipublikasikan ke host; hanya bisa
+# dijangkau dari dalam jaringan Docker (untuk Prometheus nanti).
+server {
+    listen 8081;
+    server_name _;
+    access_log off;
+
+    location = /stub_status {
+        stub_status;
+    }
+}
