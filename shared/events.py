@@ -17,6 +17,7 @@ from typing import Any
 
 # ── Broker ────────────────────────────────────────────────────
 EXCHANGE = "poem.events"
+DLX = "poem.events.dlx"  # dead-letter exchange
 
 # ── Routing keys ──────────────────────────────────────────────
 POEM_CREATED = "poem.created"
@@ -39,6 +40,15 @@ BINDINGS: dict[str, list[str]] = {
     POEM_DELETED: [QUEUE_SEARCH, QUEUE_WORDCLOUD, QUEUE_WIKI],
     POEM_ANALYZED: [QUEUE_POEM, QUEUE_WORDCLOUD, QUEUE_WIKI, QUEUE_SEARCH],
 }
+
+
+def queue_bindings() -> dict[str, list[str]]:
+    """Kembalikan peta: queue -> daftar routing key yang di-bind ke queue itu."""
+    result: dict[str, list[str]] = {}
+    for routing_key, queues in BINDINGS.items():
+        for queue in queues:
+            result.setdefault(queue, []).append(routing_key)
+    return result
 
 
 def _now_iso() -> str:
