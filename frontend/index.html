@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplikasi Puisi - Monolitik Stateful</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body bgcolor="#ffffff" text="#000000">
+
+<center>
+    <h1>Aplikasi Puisi</h1>
+    <p><b>Backend Monolitik Stateful - Single Path Routing</b></p>
+    <p>
+        Sesi: <span id="session-info">Memeriksa sesi...</span>
+        &nbsp; <button id="btn-logout" class="hidden" type="button">Logout</button>
+    </p>
+    <hr width="80%">
+</center>
+
+<table align="center" width="70%" cellpadding="5">
+<tr><td>
+
+    <div id="auth-panel">
+        <p align="center">
+            <button id="tab-login" class="tab active" type="button">Login</button>
+            <button id="tab-register" class="tab" type="button">Register</button>
+        </p>
+
+        <form id="form-login" action="#">
+            <fieldset>
+                <legend><b>Login</b></legend>
+                Username: <br>
+                <input type="text" id="login-username" name="username" required autocomplete="username" size="30"><br><br>
+                Password: <br>
+                <input type="password" id="login-password" name="password" required autocomplete="current-password" size="30"><br><br>
+                <input type="submit" value="Masuk">
+            </fieldset>
+        </form>
+
+        <form id="form-register" class="hidden" action="#">
+            <fieldset>
+                <legend><b>Register</b></legend>
+                Username: <br>
+                <input type="text" id="reg-username" name="username" required autocomplete="username" size="30"><br><br>
+                Nama Lengkap: <br>
+                <input type="text" id="reg-nama" name="nama" required size="30"><br><br>
+                Password: <br>
+                <input type="password" id="reg-password" name="password" required minlength="6" autocomplete="new-password" size="30"><br><br>
+                <input type="submit" value="Daftar">
+            </fieldset>
+        </form>
+
+        <p align="center" class="message" id="auth-message"></p>
+    </div>
+
+    <div id="app-panel" class="hidden">
+        <form id="form-puisi" action="#">
+            <fieldset>
+                <legend><b>Unggah Puisi</b></legend>
+                Judul: <br>
+                <input type="text" id="puisi-judul" name="judul" required maxlength="150" size="50"><br><br>
+                Kategori: <br>
+                <input type="text" id="puisi-kategori" name="kategori" required maxlength="50" size="50" placeholder="contoh: Alam, Cinta, Persahabatan"><br><br>
+                Keywords (opsional): <br>
+                <input type="text" id="puisi-keyword" name="keyword" maxlength="255" size="50" placeholder="pisahkan dengan koma"><br><br>
+                Isi Puisi: <br>
+                <textarea id="puisi-isi" name="isi" rows="8" cols="50" required></textarea><br><br>
+                Kutipan Bait (untuk gambar): <br>
+                <small>Penggalan singkat yang akan ditampilkan di gambar puisi (max 200 karakter)</small><br>
+                <textarea id="puisi-bait" name="bait" rows="3" cols="50" maxlength="200" placeholder="Tulis bait pendek pilihan Anda di sini..."></textarea><br><br>
+                Template Gambar: <br>
+                <small>Pilih latar belakang gambar puisi</small><br>
+                <div id="template-choices">
+                    <label class="template-label">
+                        <input type="radio" name="template" id="tpl-1" value="1" checked>
+                        <span class="template-name">1</span>
+                    </label>
+                    &nbsp;
+                    <label class="template-label">
+                        <input type="radio" name="template" id="tpl-2" value="2">
+                        <span class="template-name">2</span>
+                    </label>
+                    &nbsp;
+                    <label class="template-label">
+                        <input type="radio" name="template" id="tpl-3" value="3">
+                        <span class="template-name">3</span>
+                    </label>
+                    &nbsp;
+                    <label class="template-label">
+                        <input type="radio" name="template" id="tpl-4" value="4">
+                        <span class="template-name">4</span>
+                    </label>
+                </div><br>
+                <div id="preview-wrapper">
+                    <b>Preview Gambar:</b><br>
+                    <img id="preview-gambar" alt="Preview gambar puisi akan muncul di sini" src="" style="display:none; max-width:400px; border:1px solid #808080; margin-top:6px;">
+                    <p id="preview-status" style="font-style:italic; color:#555;"></p>
+                </div><br>
+                <input type="submit" value="Kirim Puisi" id="btn-submit-puisi">
+            </fieldset>
+        </form>
+
+        <p class="message" id="puisi-message"></p>
+
+        <h3>Daftar Puisi Saya</h3>
+        <button id="btn-refresh" type="button">Muat Ulang</button>
+        <div id="grid-puisi" class="puisi-grid"></div>
+    </div>
+
+</td></tr>
+</table>
+
+<hr width="80%">
+<center>
+    <p><i>PACS262521 - Pengembangan Perangkat Lunak Scalable</i></p>
+</center>
+
+<script src="/app.js"></script>
+</body>
+</html>

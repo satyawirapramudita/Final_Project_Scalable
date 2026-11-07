@@ -1,0 +1,6 @@
+# Override untuk deployment EC2.
+# Pakai: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+services:
+  gateway:
+    ports:
+      - "80:80"

@@ -1,0 +1,18 @@
+# Environment / secret
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node (lambda)
+node_modules/
+
+# Logs & OS
+*.log
+.DS_Store
+Thumbs.db
