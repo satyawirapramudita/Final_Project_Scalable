@@ -14,7 +14,7 @@ Tujuh layanan di balik satu gerbang Nginx:
 
 | Layanan | Peran | Pemilik |
 |---|---|---|
-| `gateway` (Nginx) | Pintu masuk tunggal, static, rate limit, X-Request-ID | Lindra |
+| `gateway` (Nginx) | Pintu masuk tunggal, static, rate limit, X-Request-ID | Anders |
 | `auth` | Register/login, terbitkan JWT | Ardi |
 | `poem` | CRUD puisi, publish event, cache baca | Satya |
 | `nlp-worker` | Pipeline NLP → `poem.analyzed` | Satya |
