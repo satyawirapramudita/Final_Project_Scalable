@@ -39,7 +39,9 @@ services:
 
   # ── Layanan HTTP (sinkron) ────────────────────────────────
   auth: # Ardi
-    build: ./services/auth
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
     container_name: puisi-auth
     restart: unless-stopped
     env_file: .env
@@ -60,7 +62,9 @@ services:
       - data
 
   poem: # Satya
-    build: ./services/poem
+    build:
+      context: .
+      dockerfile: services/poem/Dockerfile
     container_name: puisi-poem
     restart: unless-stopped
     env_file: .env
@@ -77,12 +81,21 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8002/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - edge
       - data
 
   wordcloud: # Lindra
-    build: ./services/wordcloud
+    build:
+      context: .
+      dockerfile: services/wordcloud/Dockerfile
     container_name: puisi-wordcloud
     restart: unless-stopped
     env_file: .env
@@ -103,7 +116,9 @@ services:
       - data
 
   search: # Anders
-    build: ./services/search
+    build:
+      context: .
+      dockerfile: services/search/Dockerfile
     container_name: puisi-search
     restart: unless-stopped
     env_file: .env
@@ -119,7 +134,9 @@ services:
       - data
 
   wiki-linker: # Dzaky
-    build: ./services/wiki-linker
+    build:
+      context: .
+      dockerfile: services/wiki-linker/Dockerfile
     container_name: puisi-wiki-linker
     restart: unless-stopped
     env_file: .env
@@ -140,7 +157,9 @@ services:
       - data
 
   tts: # Anders — ditunda/opsional
-    build: ./services/tts
+    build:
+      context: .
+      dockerfile: services/tts/Dockerfile
     container_name: puisi-tts
     restart: unless-stopped
     env_file: .env
@@ -154,7 +173,9 @@ services:
 
   # ── Worker asinkron (tanpa API publik) ────────────────────
   nlp-worker: # Satya
-    build: ./services/nlp-worker
+    build:
+      context: .
+      dockerfile: services/nlp-worker/Dockerfile
     container_name: puisi-nlp-worker
     restart: unless-stopped
     env_file: .env
@@ -165,6 +186,11 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8100/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - data
 

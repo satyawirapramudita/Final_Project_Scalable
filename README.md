@@ -80,6 +80,11 @@ Menghentikan: `docker compose down` (data bertahan di volume; tambah `-v` untuk 
 Lihat [`docs/event-contracts.md`](docs/event-contracts.md) dan [`shared/events.py`](shared/events.py).
 Pemilik schema: **Satya**. Perubahan bersifat *additive*.
 
+## Deployment
+
+Rencana & langkah deployment AWS ada di [`docs/deployment.md`](docs/deployment.md)
+(EC2 + Docker Compose; S3 + CloudFront + Lambda; region `us-east-1`).
+
 ## Aturan kontribusi
 
 1. Setiap layanan punya `Dockerfile` + `/health` + `/metrics`.
