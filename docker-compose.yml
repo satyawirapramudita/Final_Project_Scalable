@@ -75,7 +75,7 @@ services:
     build:
       context: .
       dockerfile: services/poem/Dockerfile
-    container_name: puisi-poem
+    # Tanpa container_name agar bisa di-scale: docker compose up -d --scale poem=2
     restart: unless-stopped
     env_file: .env
     environment:
@@ -200,7 +200,7 @@ services:
     build:
       context: .
       dockerfile: services/nlp-worker/Dockerfile
-    container_name: puisi-nlp-worker
+    # Tanpa container_name agar bisa di-scale: docker compose up -d --scale nlp-worker=3
     restart: unless-stopped
     env_file: .env
     environment:

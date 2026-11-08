@@ -11,7 +11,7 @@ Puisi yang sudah dihapus tidak ada di poem_db dan tidak bisa dideteksi di sini.
 
 Dijalankan di dalam container poem (punya akses poem_db, RabbitMQ, dan shared/):
 
-    Get-Content scripts/reindex_search.py | docker exec -i puisi-poem python -
+    Get-Content scripts/reindex_search.py | docker compose exec -T poem python -
 """
 
 from __future__ import annotations

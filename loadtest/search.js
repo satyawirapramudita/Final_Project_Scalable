@@ -3,7 +3,7 @@
 // Siapkan data dulu (seed 1000 puisi untuk user 99):
 //   Get-Content scripts/publish_fake_events.py | docker compose exec -T search python - --count 1000 --user 99
 // Buat token untuk user 99:
-//   Get-Content scripts/mint_token.py | docker exec -i puisi-poem python - 99     (atau pakai shared.security.create_token)
+//   Get-Content scripts/mint_token.py | docker compose exec -T poem python - 99     (atau pakai shared.security.create_token)
 //
 // Jalankan dari luar instance, ke gateway. Gateway membatasi 20 r/s per IP secara default,
 // jadi naikkan dulu di .env:  API_RATE_LIMIT=5000r/s  API_BURST=1000  lalu recreate gateway.
