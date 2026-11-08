@@ -16,7 +16,9 @@ from contextlib import asynccontextmanager
 
 import pymysql
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+
+from shared.metrics import REQUEST_SECONDS, route_path
 
 from . import cache, config, consumer, db
 from .engine import engine
@@ -30,12 +32,6 @@ REQUEST_COUNT = Counter(
     "http_requests_total",
     "Total HTTP requests",
     ["service", "method", "path", "status"],
-)
-REQUEST_SECONDS = Histogram(
-    "http_request_duration_seconds",
-    "Latensi request HTTP",
-    ["service", "method", "path"],
-    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5),
 )
 CACHE_RESULT = Counter("search_cache_total", "Hasil lookup cache pencarian", ["result"])
 
@@ -54,9 +50,7 @@ app = FastAPI(title="puisi search service", version="0.2.0", lifespan=lifespan)
 async def observe_requests(request: Request, call_next):
     started = time.perf_counter()
     response = await call_next(request)
-    # Pakai template route (bukan URL mentah) agar label metrik tidak meledak.
-    route = request.scope.get("route")
-    path = getattr(route, "path", "unmatched")
+    path = route_path(request)
     REQUEST_COUNT.labels(config.SERVICE_NAME, request.method, path, response.status_code).inc()
     REQUEST_SECONDS.labels(config.SERVICE_NAME, request.method, path).observe(
         time.perf_counter() - started
