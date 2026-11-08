@@ -129,16 +129,30 @@ services:
     build:
       context: .
       dockerfile: services/search/Dockerfile
-    container_name: puisi-search
+    # Tanpa container_name agar bisa di-scale: docker compose up -d --scale search=3
     restart: unless-stopped
     env_file: .env
     environment:
       <<: *common-env
       SERVICE_NAME: search
       PORT: "8004"
+      DB_HOST: ${MYSQL_HOST:-mysql}
+      DB_PORT: ${MYSQL_PORT:-3306}
+      DB_NAME: ${SEARCH_DB_NAME:-search_db}
+      DB_USER: ${SEARCH_DB_USER:-search_user}
+      DB_PASSWORD: ${SEARCH_DB_PASSWORD}
     depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       redis:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8004/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - edge
       - data
