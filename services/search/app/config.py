@@ -38,6 +38,10 @@ REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = _int("REDIS_PORT", 6379)
 
 CACHE_TTL_SEARCH = _int("CACHE_TTL_SEARCH", 45)
+# Invalidasi cache digabung: paling cepat sekali per interval ini (detik). Puisi baru
+# muncul di pencarian paling lambat selama interval ini; semburan penulisan hanya
+# membatalkan cache sekali alih-alih ratusan kali.
+CACHE_BUMP_INTERVAL = _int("CACHE_BUMP_INTERVAL", 2)
 
 DEFAULT_LIMIT = 10
 MAX_LIMIT = _int("SEARCH_MAX_LIMIT", 20)

@@ -265,18 +265,15 @@ def list_poems(user: dict = Depends(current_user)) -> dict:
 
 
 @app.get("/api/poems/{poem_id}")
-def get_poem(poem_id: int, user: dict = Depends(current_user)) -> dict:
-    user_id = int(user["sub"])
+def get_poem(poem_id: int, _user: dict = Depends(current_user)) -> dict:
+    # Puisi bersifat publik untuk dibaca oleh pengguna yang login (hasil pencarian
+    # mencakup semua puisi). Mengubah dan menghapus tetap hanya untuk pemilik.
     key = f"cache:puisi:{poem_id}"
     cached = cache.get(key)
     if cached is not None:
-        if cached.get("user_id") != user_id:
-            raise HTTPException(status_code=403, detail="Bukan pemilik puisi")
         return {"ok": True, "puisi": cached, "cached": True}
 
     row = _get_row(poem_id)
-    if row["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Bukan pemilik puisi")
     tags = _tags_for([poem_id]).get(poem_id, [])
     item = _serialize(row, tags)
     cache.set(key, item, config.CACHE_TTL_DETAIL)

@@ -14,13 +14,14 @@ Pemilik: Anders. Indeks dan pencarian puisi (MySQL FULLTEXT di `search_db`).
 | `page`, `limit` | Default 1 dan 10. `limit` dibatasi 20, `page` dibatasi 50. |
 
 Respons: `{ok, q, page, limit, has_more, items:[{id, judul, snippet, kategori, tags, score}], cached}`.
-Pencarian hanya mencakup puisi milik pengguna di JWT (puisi bersifat privat). `400` bila `q` kosong, `503` bila database penuh atau tidak terjangkau.
+Pencarian mencakup **semua puisi** dari semua pengguna; JWT tetap wajib (login) tetapi tidak membatasi hasil. Tiap item memuat `user_id` penulisnya. `400` bila `q` kosong, `503` bila database penuh atau tidak terjangkau.
 
 ## Cara kerja
 
 - **Indeks** dipelihara dari event, bukan dari database poem: `poem.created/updated` mengisi judul, isi, kategori; `poem.analyzed` mengisi tag; `poem.deleted` memberi tombstone.
 - **Urutan event aman.** Tiap kelompok data punya cap waktu event; event yang lebih lama tidak menimpa yang lebih baru, dan puisi yang sudah dihapus tidak hidup lagi oleh event yang terlambat. Pengiriman ganda aman.
-- **Cache Redis** per pengguna (TTL 45 dtk). Setiap event yang mengubah indeks menaikkan versi cache pengguna itu, sehingga puisi baru langsung muncul tanpa menunggu TTL.
+- **Cache Redis** dengan satu versi global (TTL 45 dtk). Setiap perubahan indeks menaikkan versi itu, sehingga hasil lama tidak dipakai lagi. Kenaikan versi digabung (`CACHE_BUMP_INTERVAL`, default 2 dtk, plus satu kenaikan susulan): puisi baru muncul di pencarian paling lambat sekitar 2 dtk, dan semburan penulisan hanya membatalkan cache sekali, bukan untuk setiap puisi.
+- **Akses baca.** Pencarian mencakup semua puisi, dan `GET /api/poems/{id}` di poem service bisa dibaca oleh pengguna yang login mana pun, jadi hasil pencarian bisa dibuka. Mengubah dan menghapus (`PUT`/`DELETE`) tetap hanya untuk pemilik (403 bagi yang lain), dan `GET /api/poems` (daftar) tetap hanya puisi milik sendiri.
 - **Perlindungan beban.** Koneksi MySQL dibatasi (`DB_POOL_SIZE`, default 10); request yang tidak kebagian koneksi gagal cepat (503). Saat Redis atau MySQL mati, layanan berhenti mencobanya sementara sehingga request tidak menunggu ~8 dtk.
 - **Pemadaman MySQL.** Consumer menahan event hingga ~45 dtk menunggu database kembali, alih-alih membuangnya ke DLQ. Bila lebih lama, bangun ulang indeks dengan `scripts/reindex_search.py`.
 
