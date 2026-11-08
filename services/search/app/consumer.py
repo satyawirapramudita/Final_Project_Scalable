@@ -103,13 +103,13 @@ def handle_event(data: dict) -> None:
     payload = data.get("payload") or {}
     at = _parse_time(data.get("occurred_at"))
     try:
-        outcome, user_id = _apply_waiting_for_db(name, payload, at)
+        outcome, _user_id = _apply_waiting_for_db(name, payload, at)
     except Exception:
         EVENTS.labels(name, "error").inc()
         raise
     EVENTS.labels(name, outcome).inc()
-    if outcome == APPLIED and user_id is not None:
-        cache.bump(user_id)
+    if outcome == APPLIED:
+        cache.bump()
     log.info("%s poem=%s -> %s", name, payload.get("poem_id"), outcome)
 
 

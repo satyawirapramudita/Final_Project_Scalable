@@ -3,8 +3,8 @@
     GET /api/search?q=&kategori=&tag=&page=&limit=
 
 Indeks dipelihara dari event poem.* (queue search.q), bukan dari database
-poem. Pencarian dibatasi pada puisi milik pengguna di JWT (puisi bersifat
-privat) dan hasilnya di-cache di Redis per pengguna.
+poem. Pencarian mencakup SEMUA puisi (bukan hanya milik pengguna); JWT tetap
+wajib. Hasilnya di-cache di Redis dengan satu versi global.
 """
 
 from __future__ import annotations
@@ -81,10 +81,9 @@ def search(
     tag: str = Query(""),
     page: int = Query(1),
     limit: int = Query(config.DEFAULT_LIMIT),
-    user: dict = Depends(current_user),
+    _user: dict = Depends(current_user),
 ) -> dict:
-    user_id = int(user["sub"])
-
+    # Login wajib, tetapi hasil mencakup semua puisi (bukan hanya milik pengguna).
     tokens = tokenize(q)
     if not tokens:
         raise HTTPException(status_code=400, detail="Kata kunci pencarian minimal 2 karakter")
@@ -98,7 +97,7 @@ def search(
         "|".join([" ".join(tokens), kategori.lower(), tag, str(page), str(limit)]).encode("utf-8")
     ).hexdigest()
 
-    cached, version = cache.lookup(user_id, digest)
+    cached, version = cache.lookup(digest)
     if cached is not None:
         CACHE_RESULT.labels("hit").inc()
         return {**cached, "cached": True}
@@ -107,7 +106,6 @@ def search(
     try:
         # limit + 1 baris cukup untuk tahu ada halaman berikutnya tanpa COUNT(*) kedua.
         rows = engine.search(
-            user_id=user_id,
             match=match_expression(tokens),
             kategori=kategori,
             tag=tag,
@@ -131,6 +129,7 @@ def search(
         "items": [
             {
                 "id": row["poem_id"],
+                "user_id": row["user_id"],
                 "judul": row["judul"],
                 "snippet": make_snippet(row["isi"], tokens),
                 "kategori": row["kategori"],
@@ -140,5 +139,5 @@ def search(
             for row in rows[:limit]
         ],
     }
-    cache.store(user_id, digest, version, result)
+    cache.store(digest, version, result)
     return {**result, "cached": False}

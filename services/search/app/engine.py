@@ -42,7 +42,6 @@ class SearchEngine(ABC):
     def search(
         self,
         *,
-        user_id: int,
         match: str,
         kategori: str,
         tag: str,
@@ -118,15 +117,15 @@ class MySQLEngine(SearchEngine):
 
     # ── Pencarian ────────────────────────────────────────────
 
-    def search(self, *, user_id, match, kategori, tag, limit, offset):
+    def search(self, *, match, kategori, tag, limit, offset):
         sql = (
-            "SELECT poem_id, judul, SUBSTRING(isi, 1, 1500) AS isi, kategori, tags, "
+            "SELECT poem_id, user_id, judul, SUBSTRING(isi, 1, 1500) AS isi, kategori, tags, "
             "MATCH(judul, isi, tags) AGAINST (%s IN BOOLEAN MODE) AS score "
             "FROM search_poem "
-            "WHERE user_id = %s AND deleted = 0 "
+            "WHERE deleted = 0 "
             "AND MATCH(judul, isi, tags) AGAINST (%s IN BOOLEAN MODE)"
         )
-        params: list[Any] = [match, user_id, match]
+        params: list[Any] = [match, match]
         if kategori:
             sql += " AND kategori = %s"
             params.append(kategori)
