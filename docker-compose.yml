@@ -9,7 +9,7 @@ name: puisi-scalable
 x-common-env: &common-env
   JWT_SECRET: ${JWT_SECRET}
   JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
-  JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
+  JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-1440}
   RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
   RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
   RABBITMQ_USER: ${RABBITMQ_USER:-puisi}
@@ -67,6 +67,11 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - edge
       - data

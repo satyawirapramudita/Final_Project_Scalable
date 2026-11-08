@@ -17,26 +17,41 @@ function showMessage(el, text, isError = false) {
     el.classList.toggle("error", Boolean(text) && isError);
 }
 
-async function api(action, method = "GET", body = null) {
+// ─── Token ────────────────────────────────────────────────────────────────────
+// JWT disimpan di localStorage dan dikirim via header Authorization: Bearer.
+// Semua layanan memverifikasi token secara lokal — restart auth tidak logout.
+const TOKEN_KEY = "puisi_token";
+
+function getToken() {
+    return localStorage.getItem(TOKEN_KEY) || "";
+}
+
+function setToken(token) {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+}
+
+async function api(path, method = "GET", body = null) {
     const options = { method, headers: {} };
+    const token = getToken();
+    if (token) options.headers["Authorization"] = `Bearer ${token}`;
     if (body !== null) {
         options.headers["Content-Type"] = "application/json";
         options.body = JSON.stringify(body);
     }
-    // Pakai prefix /api agar via CloudFront routing ke origin EC2 (behavior /api*).
-    // Server Python mengabaikan path dan hanya baca query ?action=, jadi
-    // /api/?action=... tetap works untuk dev lokal (localhost:8000) maupun EC2 langsung.
-    const res = await fetch(`/api?action=${action}`, options);
+    // Endpoint berbasis path lewat gateway: /api/auth/*, /api/poems, dst.
+    const res = await fetch(`/api/${path}`, options);
     const data = await res.json().catch(() => ({}));
     return { status: res.status, data };
 }
 
 // ─── Sesi ────────────────────────────────────────────────────────────────────
 async function checkSession() {
-    const { data } = await api("me");
+    const { data } = await api("auth/me");
     if (data.ok) {
         enterApp(data.nama, data.username);
     } else {
+        setToken("");
         showAuth();
     }
 }
@@ -69,12 +84,13 @@ function showAuth() {
 async function login(e) {
     e.preventDefault();
     showMessage($("auth-message"), "");
-    const { status, data } = await api("login", "POST", {
+    const { status, data } = await api("auth/login", "POST", {
         username: $("login-username").value,
         password: $("login-password").value,
     });
     if (status === 200 && data.ok) {
         $("form-login").reset();
+        setToken(data.token);
         enterApp(data.nama, data.username);
     } else {
         showMessage($("auth-message"), data.message || "Login gagal", true);
@@ -84,7 +100,7 @@ async function login(e) {
 async function register(e) {
     e.preventDefault();
     showMessage($("auth-message"), "");
-    const { status, data } = await api("register", "POST", {
+    const { status, data } = await api("auth/register", "POST", {
         username: $("reg-username").value,
         nama: $("reg-nama").value,
         password: $("reg-password").value,
@@ -99,7 +115,8 @@ async function register(e) {
 }
 
 async function logout() {
-    await api("logout", "POST");
+    setToken("");
+    await api("auth/logout", "POST");
     showAuth();
     showMessage($("auth-message"), "Anda telah logout.", false);
 }
@@ -255,13 +272,12 @@ async function submitPuisi(e) {
 
         // Langkah 2: kirim metadata ke backend EC2
         showMessage($("puisi-message"), "Menyimpan puisi...");
-        const { status, data } = await api("submit_puisi", "POST", {
+        const { status, data } = await api("poems", "POST", {
             judul: $("puisi-judul").value.trim(),
             kategori: $("puisi-kategori").value.trim(),
             keyword: $("puisi-keyword").value.trim(),
             isi: $("puisi-isi").value.trim(),
             bait: bait,
-            template: params.template,
             gambar_file: gambar_file,
         });
 
@@ -269,11 +285,18 @@ async function submitPuisi(e) {
             $("form-puisi").reset();
             $("preview-gambar").style.display = "none";
             $("preview-status").textContent = "";
-            showMessage($("puisi-message"), data.message, false);
+            showMessage(
+                $("puisi-message"),
+                data.message || "Puisi berhasil dikirim, menunggu analisis.",
+                false
+            );
             loadPuisi();
         } else {
             showMessage($("puisi-message"), data.message || "Gagal mengirim puisi", true);
-            if (status === 401) showAuth();
+            if (status === 401) {
+                setToken("");
+                showAuth();
+            }
         }
     } finally {
         submitBtn.disabled = false;
@@ -283,7 +306,7 @@ async function submitPuisi(e) {
 
 // ─── Daftar Puisi (Grid Kartu) ────────────────────────────────────────────────
 async function loadPuisi() {
-    const { status, data } = await api("daftar_puisi");
+    const { status, data } = await api("poems");
     if (status === 200 && data.ok) {
         const grid = $("grid-puisi");
         grid.replaceChildren();
@@ -372,6 +395,7 @@ async function loadPuisi() {
         }
         return true;
     } else if (status === 401) {
+        setToken("");
         showAuth();
     }
     return false;
