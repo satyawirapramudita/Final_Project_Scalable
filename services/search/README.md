@@ -29,7 +29,7 @@ Pencarian mencakup **semua puisi** dari semua pengguna; JWT tetap wajib (login) 
 
 ```powershell
 # bangun ulang indeks dari poem_db (indeks baru/kosong, atau event terlewat)
-Get-Content scripts/reindex_search.py | docker exec -i puisi-poem python -
+Get-Content scripts/reindex_search.py | docker compose exec -T poem python -
 
 # seed puisi palsu untuk uji beban (user 99), lalu bersihkan
 Get-Content scripts/publish_fake_events.py | docker compose exec -T search python - --count 1000 --user 99
