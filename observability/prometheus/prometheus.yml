@@ -1,0 +1,48 @@
+# Prometheus: scrape /metrics dari semua layanan.
+#
+# Layanan HTTP ditemukan lewat DNS Docker (dns_sd_configs, tipe A): bila sebuah
+# layanan di-scale (docker compose up -d --scale search=3), semua replikanya
+# otomatis ikut di-scrape tanpa mengubah file ini. Interval 5 dtk agar panel
+# Grafana cukup rapat saat uji beban.
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: auth
+    dns_sd_configs: [{ names: [auth], type: A, port: 8001, refresh_interval: 5s }]
+  - job_name: poem
+    dns_sd_configs: [{ names: [poem], type: A, port: 8002, refresh_interval: 5s }]
+  - job_name: wordcloud
+    dns_sd_configs: [{ names: [wordcloud], type: A, port: 8003, refresh_interval: 5s }]
+  - job_name: search
+    dns_sd_configs: [{ names: [search], type: A, port: 8004, refresh_interval: 5s }]
+  - job_name: wiki-linker
+    dns_sd_configs: [{ names: [wiki-linker], type: A, port: 8005, refresh_interval: 5s }]
+  - job_name: tts
+    dns_sd_configs: [{ names: [tts], type: A, port: 8006, refresh_interval: 5s }]
+  - job_name: nlp-worker
+    dns_sd_configs: [{ names: [nlp-worker], type: A, port: 8100, refresh_interval: 5s }]
+
+  # Gateway: stub_status nginx lewat exporter (jumlah request, koneksi aktif).
+  - job_name: gateway
+    static_configs:
+      - targets: ["nginx-exporter:9113"]
+
+  # RabbitMQ: metrik agregat (plugin rabbitmq_prometheus, port 15692).
+  - job_name: rabbitmq
+    static_configs:
+      - targets: ["rabbitmq:15692"]
+
+  # RabbitMQ per-queue: kedalaman, unacked, jumlah consumer (termasuk *.dlq).
+  - job_name: rabbitmq-queues
+    metrics_path: /metrics/detailed
+    params:
+      family: [queue_coarse_metrics, queue_consumer_count]
+    static_configs:
+      - targets: ["rabbitmq:15692"]

@@ -1,0 +1,2 @@
+# Dibaca container Linux; CRLF dari checkout Windows bisa merusak parser Erlang RabbitMQ.
+observability/rabbitmq/enabled_plugins text eol=lf

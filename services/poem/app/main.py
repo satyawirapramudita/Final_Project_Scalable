@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -14,6 +15,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 from pydantic import BaseModel
 
 from shared import events
+from shared.metrics import REQUEST_SECONDS, route_path
 
 from . import cache, config, db, messaging
 from .security import current_user
@@ -190,8 +192,14 @@ app = FastAPI(title="puisi poem service", version="0.2.0", lifespan=lifespan)
 
 @app.middleware("http")
 async def count_requests(request: Request, call_next):
+    started = time.perf_counter()
     response = await call_next(request)
-    REQUEST_COUNT.labels(config.SERVICE_NAME, request.method, request.url.path, response.status_code).inc()
+    # Template route (bukan URL mentah) agar label metrik tidak bertambah per id puisi.
+    path = route_path(request)
+    REQUEST_COUNT.labels(config.SERVICE_NAME, request.method, path, response.status_code).inc()
+    REQUEST_SECONDS.labels(config.SERVICE_NAME, request.method, path).observe(
+        time.perf_counter() - started
+    )
     return response
 
 

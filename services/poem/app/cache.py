@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 
+from prometheus_client import Counter
+
 try:
     import redis
 except Exception:  # noqa: BLE001
@@ -13,6 +15,7 @@ except Exception:  # noqa: BLE001
 from . import config
 
 log = logging.getLogger("poem.cache")
+CACHE_RESULT = Counter("poem_cache_total", "Hasil lookup cache poem", ["result"])
 _client = None
 
 
@@ -35,8 +38,10 @@ def get(key: str):
         if client is None:
             return None
         raw = client.get(key)
+        CACHE_RESULT.labels("hit" if raw else "miss").inc()
         return json.loads(raw) if raw else None
     except Exception:  # noqa: BLE001
+        CACHE_RESULT.labels("error").inc()
         return None
 
 

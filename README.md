@@ -41,8 +41,10 @@ Final_Project_Scalable/
 │   ├── tts/                 #   Anders (ditunda)
 │   └── _template/           #   kerangka untuk layanan baru
 ├── frontend/                # HTML/CSS/JS (dari Tugas 1)
-├── db/init.sql              # skema auth_db, poem_db, wordcloud_db, wiki_db
-├── shared/events.py         # kontrak event bersama (dibekukan di F3)
+├── db/init.sql              # skema auth_db, poem_db, wordcloud_db, wiki_db, search_db
+├── shared/                  # events.py (kontrak event), metrics.py (histogram latensi)
+├── observability/           # Prometheus, Grafana (dashboard), plugin RabbitMQ; lihat observability/README.md
+├── loadtest/                # skrip k6 (search)
 ├── docs/event-contracts.md  # dokumentasi kontrak event
 ├── lambda/                  # fitur gambar puisi (dari Tugas 1)
 ├── lambda-canvas-cdn/       # aset generator gambar (dari Tugas 1)
@@ -60,6 +62,7 @@ docker compose up --build -d
 
 - Aplikasi (via gateway): **http://localhost:8080**
 - RabbitMQ management: **http://localhost:15672** (user/pass dari `.env`)
+- Grafana (dashboard SLO): **http://localhost:3000** (`admin` / `GRAFANA_ADMIN_PASSWORD`), Prometheus: **http://localhost:9090**
 - Cek kesehatan: `curl http://localhost:8080/api/poems` → 404 dari poem (belum diimplementasikan) itu normal untuk F0.
 
 Menghentikan: `docker compose down` (data bertahan di volume; tambah `-v` untuk hapus).
