@@ -5,7 +5,7 @@ STATUS: worker asinkron (tanpa API publik). Membuka /health dan /metrics saja.
 Catatan F3:
 - Konsumsi poem.created/updated (queue nlp.q).
 - Pipeline: tokenisasi, stopword, ekstraksi keyword/tag, dan Kata Puitif.
-- Publish poem.analyzed (queue poem.q, wordcloud.q, wiki.q, search.q).
+- Publish poem.analyzed (queue poem.q, wordcloud.q, kbbi.q, search.q).
 - Idempotent, prefetch kecil, DLQ.
 - Keputusan terbuka: pustaka NLP bahasa Indonesia.
 """

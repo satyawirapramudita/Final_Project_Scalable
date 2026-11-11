@@ -17,6 +17,7 @@ from typing import Any
 
 # ── Broker ────────────────────────────────────────────────────
 EXCHANGE = "poem.events"
+DLX = "poem.events.dlx"
 
 # ── Routing keys ──────────────────────────────────────────────
 POEM_CREATED = "poem.created"
@@ -28,7 +29,7 @@ POEM_ANALYZED = "poem.analyzed"
 QUEUE_NLP = "nlp.q"
 QUEUE_POEM = "poem.q"
 QUEUE_WORDCLOUD = "wordcloud.q"
-QUEUE_WIKI = "wiki.q"
+QUEUE_KBBI = "kbbi.q"
 QUEUE_SEARCH = "search.q"
 QUEUE_TTS = "tts.q"
 
@@ -36,9 +37,18 @@ QUEUE_TTS = "tts.q"
 BINDINGS: dict[str, list[str]] = {
     POEM_CREATED: [QUEUE_NLP, QUEUE_SEARCH, QUEUE_TTS],
     POEM_UPDATED: [QUEUE_NLP, QUEUE_SEARCH, QUEUE_TTS],
-    POEM_DELETED: [QUEUE_SEARCH, QUEUE_WORDCLOUD, QUEUE_WIKI],
-    POEM_ANALYZED: [QUEUE_POEM, QUEUE_WORDCLOUD, QUEUE_WIKI, QUEUE_SEARCH],
+    POEM_DELETED: [QUEUE_SEARCH, QUEUE_WORDCLOUD, QUEUE_KBBI],
+    POEM_ANALYZED: [QUEUE_POEM, QUEUE_WORDCLOUD, QUEUE_KBBI, QUEUE_SEARCH],
 }
+
+
+def queue_bindings() -> dict[str, list[str]]:
+    """Return routing keys grouped by durable consumer queue."""
+    result: dict[str, list[str]] = {}
+    for routing_key, queues in BINDINGS.items():
+        for queue in queues:
+            result.setdefault(queue, []).append(routing_key)
+    return result
 
 
 def _now_iso() -> str:

@@ -1,0 +1,24 @@
+name: kbbi-mysql
+
+services:
+  mysql:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD wajib diisi}
+      MYSQL_DATABASE: ${KBBI_DB_NAME:-kbbi_db}
+      MYSQL_USER: ${KBBI_DB_USER:-kbbi_user}
+      MYSQL_PASSWORD: ${KBBI_DB_PASSWORD:?KBBI_DB_PASSWORD wajib diisi}
+    ports:
+      - "${MYSQL_BIND_ADDRESS:-0.0.0.0}:${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - kbbi_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  kbbi_mysql_data:

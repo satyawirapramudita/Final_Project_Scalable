@@ -5,8 +5,8 @@ Transformasi dari monolit stateful [Monolithic-Stateful-AWS-Deployment](https://
 
 **Mata kuliah:** PACS262521 — Pengembangan Perangkat Lunak Scalable
 
-> Status: **F0 (fondasi)** — struktur repo + Compose skeleton. Layanan masih kerangka
-> (hanya `/health` dan `/metrics`); logika bisnis menyusul pada F1–F4.
+> Status: struktur repo dan Compose tersedia. `kbbi-linker` telah memiliki logika F4;
+> layanan lain masih mengikuti status implementasi branch masing-masing.
 
 ## Arsitektur target
 
@@ -20,10 +20,10 @@ Tujuh layanan di balik satu gerbang Nginx:
 | `nlp-worker` | Pipeline NLP → `poem.analyzed` | Satya |
 | `wordcloud` | Frekuensi istilah dominan | Lindra |
 | `search` | Indeks & pencarian | Anders |
-| `wiki-linker` | Kata Puitif → halaman Wikipedia | Dzaky |
+| `kbbi-linker` | Kata Puitif → bentuk baku dan definisi KBBI | Dzaky |
 | `tts` (opsional) | Puisi → audio | Anders — **ditunda** |
 
-Komunikasi: sinkron (HTTP) untuk login/baca/cari; asinkron (**RabbitMQ**) untuk NLP, word cloud, wiki, TTS.
+Komunikasi: sinkron (HTTP) untuk login/baca/cari; asinkron (**RabbitMQ**) untuk NLP, word cloud, KBBI, TTS.
 Store: MySQL (database logis per layanan) + Redis (cache).
 
 ## Struktur
@@ -37,11 +37,11 @@ Final_Project_Scalable/
 │   ├── nlp-worker/          #   Satya
 │   ├── wordcloud/           #   Lindra
 │   ├── search/              #   Anders
-│   ├── wiki-linker/         #   Dzaky
+│   ├── kbbi-linker/         #   Dzaky
 │   ├── tts/                 #   Anders (ditunda)
 │   └── _template/           #   kerangka untuk layanan baru
 ├── frontend/                # HTML/CSS/JS (dari Tugas 1)
-├── db/init.sql              # skema auth_db, poem_db, wordcloud_db, wiki_db
+├── db/init.sql              # skema auth_db, poem_db, wordcloud_db, kbbi_db
 ├── shared/events.py         # kontrak event bersama (dibekukan di F3)
 ├── docs/event-contracts.md  # dokumentasi kontrak event
 ├── lambda/                  # fitur gambar puisi (dari Tugas 1)
@@ -72,7 +72,7 @@ Menghentikan: `docker compose down` (data bertahan di volume; tambah `-v` untuk 
 | `GET/POST /api/poems`, `GET/PUT/DELETE /api/poems/{id}` | poem | F2 |
 | `GET /api/wordcloud/{poem_id}` | wordcloud | F4 |
 | `GET /api/search?q=` | search | F4 |
-| `GET /api/wiki/{poem_id}` | wiki-linker | F4 |
+| `GET /api/kbbi/{poem_id}` | kbbi-linker | F4 |
 | `GET /api/tts/{poem_id}` | tts | F4 (opsional) |
 
 ## Kontrak event
