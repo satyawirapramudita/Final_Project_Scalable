@@ -9,7 +9,7 @@ name: puisi-scalable
 x-common-env: &common-env
   JWT_SECRET: ${JWT_SECRET}
   JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
-  JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
+  JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-1440}
   RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
   RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
   RABBITMQ_USER: ${RABBITMQ_USER:-puisi}
@@ -18,28 +18,40 @@ x-common-env: &common-env
   REDIS_PORT: ${REDIS_PORT:-6379}
 
 services:
-  # ── Gerbang tunggal (Lindra) ──────────────────────────────
+  # ── Gerbang tunggal (Anders) ──────────────────────────────
   gateway:
     image: nginx:1.27-alpine
     container_name: puisi-gateway
     restart: unless-stopped
     ports:
       - "${GATEWAY_PORT:-8080}:80"
+    environment:
+      # Hanya variabel API_* yang disubstitusi ke templates/default.conf.template.
+      NGINX_ENVSUBST_FILTER: "^API_"
+      API_RATE_LIMIT: ${API_RATE_LIMIT:-20r/s}
+      API_BURST: ${API_BURST:-40}
     volumes:
       - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./gateway/conf.d:/etc/nginx/conf.d:ro
+      - ./gateway/templates:/etc/nginx/templates:ro
       - ./frontend:/usr/share/nginx/html:ro
     depends_on:
       auth:
         condition: service_started
       poem:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - edge
 
   # ── Layanan HTTP (sinkron) ────────────────────────────────
   auth: # Ardi
-    build: ./services/auth
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
     container_name: puisi-auth
     restart: unless-stopped
     env_file: .env
@@ -55,13 +67,20 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - edge
       - data
 
   poem: # Satya
-    build: ./services/poem
-    container_name: puisi-poem
+    build:
+      context: .
+      dockerfile: services/poem/Dockerfile
+    # Tanpa container_name agar bisa di-scale: docker compose up -d --scale poem=2
     restart: unless-stopped
     env_file: .env
     environment:
@@ -77,12 +96,21 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8002/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - edge
       - data
 
   wordcloud: # Lindra
-    build: ./services/wordcloud
+    build:
+      context: .
+      dockerfile: services/wordcloud/Dockerfile
     container_name: puisi-wordcloud
     restart: unless-stopped
     env_file: .env
@@ -103,17 +131,33 @@ services:
       - data
 
   search: # Anders
-    build: ./services/search
-    container_name: puisi-search
+    build:
+      context: .
+      dockerfile: services/search/Dockerfile
+    # Tanpa container_name agar bisa di-scale: docker compose up -d --scale search=3
     restart: unless-stopped
     env_file: .env
     environment:
       <<: *common-env
       SERVICE_NAME: search
       PORT: "8004"
+      DB_HOST: ${MYSQL_HOST:-mysql}
+      DB_PORT: ${MYSQL_PORT:-3306}
+      DB_NAME: ${SEARCH_DB_NAME:-search_db}
+      DB_USER: ${SEARCH_DB_USER:-search_user}
+      DB_PASSWORD: ${SEARCH_DB_PASSWORD}
     depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       redis:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8004/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - edge
       - data
@@ -151,7 +195,9 @@ services:
       - data
 
   tts: # Anders — ditunda/opsional
-    build: ./services/tts
+    build:
+      context: .
+      dockerfile: services/tts/Dockerfile
     container_name: puisi-tts
     restart: unless-stopped
     env_file: .env
@@ -165,8 +211,10 @@ services:
 
   # ── Worker asinkron (tanpa API publik) ────────────────────
   nlp-worker: # Satya
-    build: ./services/nlp-worker
-    container_name: puisi-nlp-worker
+    build:
+      context: .
+      dockerfile: services/nlp-worker/Dockerfile
+    # Tanpa container_name agar bisa di-scale: docker compose up -d --scale nlp-worker=3
     restart: unless-stopped
     env_file: .env
     environment:
@@ -176,6 +224,11 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8100/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - data
 
@@ -225,6 +278,7 @@ services:
       - "15672:15672" # management UI (dev)
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+      - ./observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -232,6 +286,65 @@ services:
       retries: 12
     networks:
       - data
+
+  # ── Observability (Anders) ────────────────────────────────
+  # Port dibind ke 127.0.0.1 saja. Di EC2 akses lewat SSH tunnel:
+  #   ssh -L 3000:localhost:3000 -L 9090:localhost:9090 ubuntu@<ip>
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: puisi-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=3d
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - edge
+      - data
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:1.3.0
+    container_name: puisi-nginx-exporter
+    restart: unless-stopped
+    command:
+      - --nginx.scrape-uri=http://gateway:8081/stub_status
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - edge
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: puisi-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/puisi-overview.json
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks:
+      - edge
 
 networks:
   edge:
@@ -243,3 +356,5 @@ volumes:
   mysql_data:
   redis_data:
   rabbitmq_data:
+  prometheus_data:
+  grafana_data:

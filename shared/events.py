@@ -17,7 +17,7 @@ from typing import Any
 
 # ── Broker ────────────────────────────────────────────────────
 EXCHANGE = "poem.events"
-DLX = "poem.events.dlx"
+DLX = "poem.events.dlx"  # dead-letter exchange
 
 # ── Routing keys ──────────────────────────────────────────────
 POEM_CREATED = "poem.created"
@@ -43,7 +43,7 @@ BINDINGS: dict[str, list[str]] = {
 
 
 def queue_bindings() -> dict[str, list[str]]:
-    """Return routing keys grouped by durable consumer queue."""
+    """Kembalikan peta: queue -> daftar routing key yang di-bind ke queue itu."""
     result: dict[str, list[str]] = {}
     for routing_key, queues in BINDINGS.items():
         for queue in queues:

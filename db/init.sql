@@ -14,17 +14,20 @@ CREATE DATABASE IF NOT EXISTS auth_db      CHARACTER SET utf8mb4 COLLATE utf8mb4
 CREATE DATABASE IF NOT EXISTS poem_db      CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE IF NOT EXISTS wordcloud_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE IF NOT EXISTS kbbi_db      CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS search_db    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- ── Pengguna per layanan (least privilege) ──
 CREATE USER IF NOT EXISTS 'auth_user'@'%'      IDENTIFIED BY 'ganti_auth_password';
 CREATE USER IF NOT EXISTS 'poem_user'@'%'      IDENTIFIED BY 'ganti_poem_password';
 CREATE USER IF NOT EXISTS 'wordcloud_user'@'%' IDENTIFIED BY 'ganti_wordcloud_password';
 CREATE USER IF NOT EXISTS 'kbbi_user'@'%'      IDENTIFIED BY 'ganti_kbbi_password';
+CREATE USER IF NOT EXISTS 'search_user'@'%'    IDENTIFIED BY 'ganti_search_password';
 
 GRANT ALL PRIVILEGES ON auth_db.*      TO 'auth_user'@'%';
 GRANT ALL PRIVILEGES ON poem_db.*      TO 'poem_user'@'%';
 GRANT ALL PRIVILEGES ON wordcloud_db.* TO 'wordcloud_user'@'%';
 GRANT ALL PRIVILEGES ON kbbi_db.*      TO 'kbbi_user'@'%';
+GRANT ALL PRIVILEGES ON search_db.*    TO 'search_user'@'%';
 FLUSH PRIVILEGES;
 
 -- ── auth_db (Ardi) ──

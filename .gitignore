@@ -16,3 +16,9 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+
+# Dokumen kerja & testcase lokal (tidak dipublikasikan ke repo)
+docs/Dokumen-Rancangan-Arsitektur.md
+docs/Rencana-Pengembangan-Final-Project-Scalable.md
+services/auth/tests/
+services/auth/pytest.ini
