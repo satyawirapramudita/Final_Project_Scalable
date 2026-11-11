@@ -42,7 +42,7 @@ belum punya panel: belum ada metrik waktu antar-event; yang tersedia hanya kedal
 
 ## Memakai `shared/metrics.py` di layanan lain
 
-Saat ini hanya `poem` dan `search` memiliki histogram latensi. Layanan lain (auth, wordcloud, wiki-linker, tts, nlp-worker)
+Saat ini `poem`, `search`, dan `kbbi-linker` memiliki histogram latensi. Layanan lain (auth, wordcloud, tts, nlp-worker)
 baru menghitung request. Tambahkan ke middleware layanan masing-masing agar muncul di dashboard:
 
 ```python

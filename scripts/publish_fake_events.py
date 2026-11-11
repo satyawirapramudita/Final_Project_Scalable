@@ -1,7 +1,7 @@
 """Kirim event puisi palsu ke indeks search (seed data, uji tanpa layanan lain).
 
 Secara default event dikirim LANGSUNG ke antrean search.q (tanpa lewat exchange),
-jadi nlp-worker, wordcloud, wiki, dan tts tidak ikut menerimanya. Dengan
+jadi nlp-worker, wordcloud, kbbi-linker, dan tts tidak ikut menerimanya. Dengan
 --via-exchange event lewat poem.events seperti event asli.
 
 Dijalankan di dalam container search (punya shared/ dan akses RabbitMQ):

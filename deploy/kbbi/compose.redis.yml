@@ -1,0 +1,19 @@
+name: kbbi-redis
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_BIND_ADDRESS:-0.0.0.0}:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - kbbi_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  kbbi_redis_data:

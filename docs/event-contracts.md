@@ -11,8 +11,8 @@ Broker: **RabbitMQ**, satu topic exchange `poem.events`. Setiap konsumen punya q
 |---|---|---|---|
 | `poem.created` | poem (Satya) | nlp.q (Satya), search.q (Anders), tts.q (Anders) | `event_id, correlation_id, poem_id, user_id, judul, isi, kategori, occurred_at` |
 | `poem.updated` | poem (Satya) | nlp.q (Satya), search.q (Anders), tts.q (Anders) | sama dengan `poem.created` |
-| `poem.deleted` | poem (Satya) | search.q (Anders), wordcloud.q (Lindra), wiki.q (Dzaky) | `event_id, poem_id, occurred_at` |
-| `poem.analyzed` | nlp-worker (Satya) | poem.q (Satya), wordcloud.q (Lindra), wiki.q (Dzaky), search.q (Anders) | `event_id, correlation_id, poem_id, tags[], kata_puitif[], terms[{term,count}], occurred_at` |
+| `poem.deleted` | poem (Satya) | search.q (Anders), wordcloud.q (Lindra), kbbi.q (Dzaky) | `event_id, poem_id, occurred_at` |
+| `poem.analyzed` | nlp-worker (Satya) | poem.q (Satya), wordcloud.q (Lindra), kbbi.q (Dzaky), search.q (Anders) | `event_id, correlation_id, poem_id, tags[], kata_puitif[], terms[{term,count}], occurred_at` |
 
 `tts.q` **disiapkan tetapi belum diisi** (TTS ditunda).
 

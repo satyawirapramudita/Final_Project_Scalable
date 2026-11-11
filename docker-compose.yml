@@ -162,25 +162,34 @@ services:
       - edge
       - data
 
-  wiki-linker: # Dzaky
+  kbbi-linker: # Dzaky
     build:
       context: .
-      dockerfile: services/wiki-linker/Dockerfile
-    container_name: puisi-wiki-linker
+      dockerfile: services/kbbi-linker/Dockerfile
     restart: unless-stopped
     env_file: .env
     environment:
       <<: *common-env
-      SERVICE_NAME: wiki-linker
+      SERVICE_NAME: kbbi-linker
       PORT: "8005"
       DB_HOST: ${MYSQL_HOST:-mysql}
       DB_PORT: ${MYSQL_PORT:-3306}
-      DB_NAME: ${WIKI_DB_NAME:-wiki_db}
-      DB_USER: ${WIKI_DB_USER:-wiki_user}
-      DB_PASSWORD: ${WIKI_DB_PASSWORD}
+      DB_NAME: ${KBBI_DB_NAME:-kbbi_db}
+      DB_USER: ${KBBI_DB_USER:-kbbi_user}
+      DB_PASSWORD: ${KBBI_DB_PASSWORD}
+      KBBI_DATASET_VERSION: ${KBBI_DATASET_VERSION:-kbbi-v-local}
     depends_on:
       mysql:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8005/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - edge
       - data
