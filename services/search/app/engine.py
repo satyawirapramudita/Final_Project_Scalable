@@ -42,13 +42,15 @@ class SearchEngine(ABC):
     def search(
         self,
         *,
-        match: str,
+        match: str | None,
         kategori: str,
         tag: str,
         limit: int,
         offset: int,
     ) -> list[dict[str, Any]]:
-        """Kembalikan hingga `limit` baris, diurut relevansi."""
+        """Kembalikan hingga `limit` baris, diurut relevansi.
+
+        `match` None berarti tanpa kata kunci: hanya filter kategori/tag, urut terbaru."""
 
 
 class MySQLEngine(SearchEngine):
@@ -118,14 +120,18 @@ class MySQLEngine(SearchEngine):
     # ── Pencarian ────────────────────────────────────────────
 
     def search(self, *, match, kategori, tag, limit, offset):
-        sql = (
-            "SELECT poem_id, user_id, judul, SUBSTRING(isi, 1, 1500) AS isi, kategori, tags, "
-            "MATCH(judul, isi, tags) AGAINST (%s IN BOOLEAN MODE) AS score "
-            "FROM search_poem "
-            "WHERE deleted = 0 "
-            "AND MATCH(judul, isi, tags) AGAINST (%s IN BOOLEAN MODE)"
-        )
-        params: list[Any] = [match, match]
+        cols = "SELECT poem_id, user_id, judul, SUBSTRING(isi, 1, 1500) AS isi, kategori, tags, "
+        if match:
+            sql = (
+                cols + "MATCH(judul, isi, tags) AGAINST (%s IN BOOLEAN MODE) AS score "
+                "FROM search_poem WHERE deleted = 0 "
+                "AND MATCH(judul, isi, tags) AGAINST (%s IN BOOLEAN MODE)"
+            )
+            params: list[Any] = [match, match]
+        else:
+            # Hanya filter tag/kategori (klik tag di frontend): urut dari yang terbaru.
+            sql = cols + "0 AS score FROM search_poem WHERE deleted = 0 AND judul IS NOT NULL"
+            params = []
         if kategori:
             sql += " AND kategori = %s"
             params.append(kategori)

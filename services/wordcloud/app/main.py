@@ -1,40 +1,42 @@
 """wordcloud service — implementasi F4. Pemilik: Lindra.
 
 Endpoint:
-    GET /api/wordcloud/{poem_id}  → kembalikan frekuensi istilah puisi.
+    GET /api/wordcloud/{poem_id}  -> frekuensi kata puisi (butuh JWT, seperti layanan lain)
+        200 {ok, poem_id, terms:[{term, count}], cached}
+        404 belum dianalisis / puisi sudah dihapus
+        503 MySQL tidak tersedia
 
-Arsitektur event‑driven (RabbitMQ):
-- Konsumsi `poem.analyzed` (queue `wordcloud.q`) → upsert `term_frequency`
-  dari payload `terms[{term, count}]` ke `wordcloud_db`.
-- Konsumsi `poem.deleted` → hapus seluruh data word‑cloud puisi terkait.
-- Idempotent: upsert by `(puisi_id, term)`.
+Event-driven (RabbitMQ, queue `wordcloud.q`):
+- `poem.analyzed` -> ganti seluruh kata puisi dengan `terms[{term, count}]` terbaru
+  (kata versi lama dihapus, jadi word cloud ikut berubah saat puisi diedit).
+- `poem.deleted`  -> hapus kata + tombstone.
+- Event dobel / tidak berurutan diabaikan berdasarkan `occurred_at` (lihat db.py).
 
-**Catatan visualisasi:** Frontend dapat menampilkan word‑cloud dengan
-library JavaScript **wordcloud2.js** yang memanggil endpoint ini
-dan merender array `{term, count}` menjadi gambar word‑cloud di-browser.
+Cache: Redis cache-aside `wordcloud:{poem_id}`, diinvalidasi oleh event.
+Frontend merender hasilnya dengan wordcloud2.js.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse, Response
+from fastapi import Depends, FastAPI, HTTPException, Path, Request
+from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 
 from shared import events
+from shared.metrics import REQUEST_SECONDS, route_path
 
 from . import config, db, messaging
+from .cache import cache
+from .security import current_user
 
-# ── Logging ───────────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("wordcloud")
 
-# ── Metrik Prometheus ─────────────────────────────────────────────────────────
 REQUEST_COUNT = Counter(
     "http_requests_total",
     "Total HTTP requests",
@@ -47,74 +49,84 @@ EVENTS_PROCESSED = Counter(
 )
 
 
-# ── Handler event RabbitMQ ────────────────────────────────────────────────────
+def _event_time(raw) -> datetime:
+    """occurred_at amplop -> datetime UTC naif (format kolom DATETIME MySQL)."""
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        parsed = datetime.now(timezone.utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+
 
 def handle_wordcloud_event(data: dict) -> None:
     """Handler tunggal untuk poem.analyzed dan poem.deleted dari wordcloud.q."""
     event_name: str = data.get("event_name", "")
     payload: dict = data.get("payload") or {}
-
-    poem_id = payload.get("poem_id")
-    if poem_id is None:
-        log.warning("Event '%s' tanpa poem_id, diabaikan.", event_name)
+    if event_name not in (events.POEM_ANALYZED, events.POEM_DELETED):
         return
-    poem_id = int(poem_id)
+    try:
+        poem_id = int(payload.get("poem_id"))
+    except (TypeError, ValueError):
+        log.warning("event %s tanpa poem_id valid, diabaikan", event_name)
+        EVENTS_PROCESSED.labels(config.SERVICE_NAME, event_name, "invalid").inc()
+        return
+    occurred_at = _event_time(data.get("occurred_at"))
 
     if event_name == events.POEM_ANALYZED:
-        terms: list[dict] = payload.get("terms") or []
-        db.upsert_terms(poem_id, terms)
-        EVENTS_PROCESSED.labels(config.SERVICE_NAME, event_name, "ok").inc()
-        log.info("poem.analyzed poem_id=%d → %d term disimpan.", poem_id, len(terms))
-
-    elif event_name == events.POEM_DELETED:
-        db.delete_by_poem(poem_id)
-        EVENTS_PROCESSED.labels(config.SERVICE_NAME, event_name, "ok").inc()
-        log.info("poem.deleted poem_id=%d → term_frequency dihapus.", poem_id)
-
+        outcome = db.apply_analysis(poem_id, occurred_at, payload.get("terms") or [])
     else:
-        log.debug("Event '%s' diabaikan (bukan urusan wordcloud).", event_name)
+        outcome = db.apply_delete(poem_id, occurred_at)
+    if outcome == "applied":
+        cache.invalidate(poem_id)
+    EVENTS_PROCESSED.labels(config.SERVICE_NAME, event_name, outcome).inc()
+    log.info("%s poem_id=%d -> %s", event_name, poem_id, outcome)
 
-
-# ── Lifespan: jalankan consumer saat startup ──────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    db.init_schema()
     messaging.start_wordcloud_consumer(handle_wordcloud_event)
-    log.info("Wordcloud consumer aktif pada queue '%s'.", events.QUEUE_WORDCLOUD)
+    log.info("consumer wordcloud aktif pada queue '%s'", events.QUEUE_WORDCLOUD)
     yield
 
 
-# ── Aplikasi FastAPI ──────────────────────────────────────────────────────────
-
-app = FastAPI(
-    title="puisi wordcloud service",
-    version="0.4.0",
-    lifespan=lifespan,
-)
+app = FastAPI(title="puisi wordcloud service", version="0.5.0", lifespan=lifespan)
 
 
-# ── Endpoint: baca word cloud ─────────────────────────────────────────────────
+@app.middleware("http")
+async def observe_requests(request: Request, call_next):
+    started = time.perf_counter()
+    response = await call_next(request)
+    path = route_path(request)
+    REQUEST_COUNT.labels(config.SERVICE_NAME, request.method, path, response.status_code).inc()
+    REQUEST_SECONDS.labels(config.SERVICE_NAME, request.method, path).observe(
+        time.perf_counter() - started
+    )
+    return response
+
 
 @app.get("/api/wordcloud/{poem_id}")
-def get_wordcloud(poem_id: int) -> JSONResponse:
-    """Kembalikan daftar frekuensi istilah untuk puisi tertentu.
+def get_wordcloud(poem_id: int = Path(gt=0), _user: dict = Depends(current_user)) -> dict:
+    cached = cache.get(poem_id)
+    if cached is not None:
+        result, from_cache = cached, True
+    else:
+        try:
+            result = db.get_wordcloud(poem_id, config.MAX_TERMS)
+        except db.Unavailable:
+            raise HTTPException(status_code=503, detail="Layanan word cloud sedang tidak tersedia")
+        from_cache = False
+        if result is not None:
+            cache.set(poem_id, result)
 
-    Response (200):
-        {
-            "poem_id": 42,
-            "terms": [{"term": "hujan", "count": 5}, ...]
-        }
-    Response (404): jika tidak ada data untuk poem_id tersebut.
-    """
-    REQUEST_COUNT.labels(config.SERVICE_NAME, "GET", "/api/wordcloud/{poem_id}", 200).inc()
-    terms = db.get_terms(poem_id)
-    if not terms:
-        REQUEST_COUNT.labels(config.SERVICE_NAME, "GET", "/api/wordcloud/{poem_id}", 404).inc()
-        raise HTTPException(status_code=404, detail=f"Tidak ada data word cloud untuk poem_id={poem_id}")
-    return JSONResponse({"poem_id": poem_id, "terms": terms})
+    if result is None:
+        raise HTTPException(status_code=404, detail="Word cloud belum tersedia (puisi belum dianalisis)")
+    if result.get("deleted"):
+        raise HTTPException(status_code=404, detail="Puisi sudah dihapus")
+    return {"ok": True, "poem_id": poem_id, "terms": result["terms"], "cached": from_cache}
 
-
-# ── Endpoint: health & metrics ────────────────────────────────────────────────
 
 @app.get("/health")
 def health() -> dict:

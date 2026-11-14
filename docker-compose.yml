@@ -111,7 +111,7 @@ services:
     build:
       context: .
       dockerfile: services/wordcloud/Dockerfile
-    container_name: puisi-wordcloud
+    # Tanpa container_name agar bisa di-scale: docker compose up -d --scale wordcloud=3
     restart: unless-stopped
     env_file: .env
     environment:
@@ -123,16 +123,13 @@ services:
       DB_NAME: ${WORDCLOUD_DB_NAME:-wordcloud_db}
       DB_USER: ${WORDCLOUD_DB_USER:-wordcloud_user}
       DB_PASSWORD: ${WORDCLOUD_DB_PASSWORD}
-      WORDCLOUD_DB_HOST: ${MYSQL_HOST:-mysql}
-      WORDCLOUD_DB_PORT: ${MYSQL_PORT:-3306}
-      WORDCLOUD_DB_NAME: ${WORDCLOUD_DB_NAME:-wordcloud_db}
-      WORDCLOUD_DB_USER: ${WORDCLOUD_DB_USER:-wordcloud_user}
-      WORDCLOUD_DB_PASSWORD: ${WORDCLOUD_DB_PASSWORD}
     depends_on:
       mysql:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      redis:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8003/health').status==200 else 1)"]
       interval: 10s

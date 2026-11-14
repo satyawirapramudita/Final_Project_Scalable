@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 
 import pymysql
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 from pydantic import BaseModel
 
@@ -53,6 +54,9 @@ class LoginBody(BaseModel):
 
 # ── Helper ────────────────────────────────────────────────────
 
+# Batas atas agar request raksasa tidak membebani hashing PBKDF2.
+MAX_PASSWORD_LENGTH = 128
+
 
 def _validate_register(username: str, nama: str, password: str) -> None:
     if not USERNAME_PATTERN.fullmatch(username):
@@ -64,6 +68,10 @@ def _validate_register(username: str, nama: str, password: str) -> None:
         raise HTTPException(status_code=400, detail="Nama lengkap wajib diisi (max 100)")
     if len(password) < 6:
         raise HTTPException(status_code=400, detail="Password minimal 6 karakter")
+    if len(password) > MAX_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=400, detail=f"Password maksimal {MAX_PASSWORD_LENGTH} karakter"
+        )
 
 
 # ── App ───────────────────────────────────────────────────────
@@ -91,6 +99,18 @@ async def http_exception_to_monolith_format(request: Request, exc: HTTPException
         status_code=exc.status_code,
         content={"ok": False, "message": str(exc.detail)},
     )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_to_monolith_format(request: Request, exc: RequestValidationError):
+    """Body tidak lengkap/salah tipe -> 400 {ok:false, message} (bukan 422 {detail:[...]})."""
+    from fastapi.responses import JSONResponse
+
+    fields = sorted({str(err["loc"][-1]) for err in exc.errors() if err.get("loc")})
+    message = "Data tidak lengkap atau tidak valid"
+    if fields:
+        message += ": " + ", ".join(fields)
+    return JSONResponse(status_code=400, content={"ok": False, "message": message})
 
 
 @app.middleware("http")

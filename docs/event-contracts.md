@@ -9,12 +9,15 @@ Broker: **RabbitMQ**, satu topic exchange `poem.events`. Setiap konsumen punya q
 
 | Routing key | Producer | Konsumen (queue) | Payload inti |
 |---|---|---|---|
-| `poem.created` | poem (Satya) | nlp.q (Satya), search.q (Anders), tts.q (Anders) | `event_id, correlation_id, poem_id, user_id, judul, isi, kategori, occurred_at` |
-| `poem.updated` | poem (Satya) | nlp.q (Satya), search.q (Anders), tts.q (Anders) | sama dengan `poem.created` |
+| `poem.created` | poem (Satya) | nlp.q (Satya), search.q (Anders) | `event_id, correlation_id, poem_id, user_id, judul, isi, kategori, occurred_at` |
+| `poem.updated` | poem (Satya) | nlp.q (Satya), search.q (Anders) | sama dengan `poem.created` |
 | `poem.deleted` | poem (Satya) | search.q (Anders), wordcloud.q (Lindra), kbbi.q (Dzaky) | `event_id, poem_id, occurred_at` |
 | `poem.analyzed` | nlp-worker (Satya) | poem.q (Satya), wordcloud.q (Lindra), kbbi.q (Dzaky), search.q (Anders) | `event_id, correlation_id, poem_id, tags[], kata_puitif[], terms[{term,count}], occurred_at` |
 
-`tts.q` **disiapkan tetapi belum diisi** (TTS ditunda).
+`tts.q` **belum di-bind** (TTS ditunda). Antrean tanpa konsumen hanya menumpuk pesan dan memakan
+memori RabbitMQ saat uji beban; tambahkan `QUEUE_TTS` ke `BINDINGS` di `shared/events.py` begitu
+layanan tts punya konsumen. Broker yang sudah berjalan masih menyimpan antrean lama; hapus sekali dengan
+`docker compose exec rabbitmq rabbitmqctl delete_queue tts.q`.
 
 ## Amplop standar
 
@@ -57,5 +60,8 @@ Semua event membawa:
 3. Pesan gagal diulang dengan **backoff**, lalu dipindahkan ke **dead-letter queue** (`*.dlq`) setelah batas percobaan.
 4. Perubahan skema bersifat **additive**.
 5. Idempotency: dedupe `event_id` atau upsert berdasarkan `poem_id`.
+6. Urutan: konsumen membandingkan `occurred_at` dengan event terakhir yang diterapkan untuk puisi itu dan
+   mengabaikan event yang lebih lama; `poem.deleted` meninggalkan tombstone sehingga `poem.analyzed` yang
+   terlambat tidak menghidupkan data lagi (search, wordcloud, kbbi-linker).
 
 Definisi kode: [`shared/events.py`](../shared/events.py).

@@ -33,10 +33,13 @@ QUEUE_KBBI = "kbbi.q"
 QUEUE_SEARCH = "search.q"
 QUEUE_TTS = "tts.q"
 
-# Bindings: routing key -> daftar queue yang berminat
+# Bindings: routing key -> daftar queue yang berminat.
+# QUEUE_TTS sengaja BELUM di-bind: TTS ditunda dan belum ada konsumennya, jadi
+# antrean itu hanya akan menumpuk pesan (memakan memori RabbitMQ saat uji beban).
+# Tambahkan QUEUE_TTS ke poem.created/updated begitu layanan tts punya konsumen.
 BINDINGS: dict[str, list[str]] = {
-    POEM_CREATED: [QUEUE_NLP, QUEUE_SEARCH, QUEUE_TTS],
-    POEM_UPDATED: [QUEUE_NLP, QUEUE_SEARCH, QUEUE_TTS],
+    POEM_CREATED: [QUEUE_NLP, QUEUE_SEARCH],
+    POEM_UPDATED: [QUEUE_NLP, QUEUE_SEARCH],
     POEM_DELETED: [QUEUE_SEARCH, QUEUE_WORDCLOUD, QUEUE_KBBI],
     POEM_ANALYZED: [QUEUE_POEM, QUEUE_WORDCLOUD, QUEUE_KBBI, QUEUE_SEARCH],
 }

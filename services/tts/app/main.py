@@ -7,7 +7,8 @@ Endpoint rencana (jika diaktifkan):
 
 Catatan:
 - Konsumsi poem.created/updated (queue tts.q) -> hasilkan audio, simpan ke S3.
-- tts.q disiapkan di shared/events.py tetapi belum diisi sampai fitur aktif.
+- tts.q didefinisikan di shared/events.py tetapi belum di-bind ke exchange sampai fitur aktif
+  (antrean tanpa konsumen hanya menumpuk pesan).
 """
 
 from __future__ import annotations

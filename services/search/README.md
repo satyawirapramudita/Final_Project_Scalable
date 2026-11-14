@@ -8,7 +8,7 @@ Pemilik: Anders. Indeks dan pencarian puisi (MySQL FULLTEXT di `search_db`).
 
 | Parameter | Keterangan |
 |---|---|
-| `q` | Wajib. Minimal 2 karakter setelah dibersihkan; maksimal 8 kata. Tiap kata dicocokkan sebagai awalan (`sen` menemukan `senja`); dokumen yang cocok dengan lebih banyak kata diurut lebih tinggi. |
+| `q` | Wajib, kecuali `kategori` atau `tag` diisi (tanpa `q` hasil diurut dari yang terbaru). Minimal 2 karakter setelah dibersihkan; maksimal 8 kata. Tiap kata dicocokkan sebagai awalan (`sen` menemukan `senja`); dokumen yang cocok dengan lebih banyak kata diurut lebih tinggi. |
 | `kategori` | Opsional. Kategori persis. |
 | `tag` | Opsional. Satu tag hasil analisis. |
 | `page`, `limit` | Default 1 dan 10. `limit` dibatasi 20, `page` dibatasi 50. |

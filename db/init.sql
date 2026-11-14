@@ -75,6 +75,14 @@ CREATE TABLE IF NOT EXISTS term_frequency (
     PRIMARY KEY (puisi_id, term)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
+-- Waktu analisis terakhir + tombstone hapus (event dobel/terlambat diabaikan).
+-- Layanan wordcloud juga membuat tabel ini sendiri saat start (volume lama).
+CREATE TABLE IF NOT EXISTS wordcloud_poem_state (
+    poem_id      INT         NOT NULL PRIMARY KEY,
+    analyzed_at  DATETIME(6) NULL,
+    deleted      TINYINT(1)  NOT NULL DEFAULT 0
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
 -- ── kbbi_db (Dzaky) ──
 USE kbbi_db;
 CREATE TABLE IF NOT EXISTS kbbi_entries (
