@@ -212,3 +212,36 @@ p.empty {
     color: #555555;
     padding: 12px 0;
 }
+
+/* ── Word Cloud ── */
+.wc-btn {
+    display: block;
+    width: 100%;
+    text-align: center;
+    padding: 5px 0;
+    font-size: 12px;
+    cursor: pointer;
+    border-top: 1px solid #808080;
+    border-bottom: none;
+    border-left: none;
+    border-right: none;
+    background-color: #eef;
+}
+
+.wc-btn:hover {
+    background-color: #ddf;
+}
+
+.wc-container {
+    text-align: center;
+    padding: 6px;
+    background-color: #f8f8f8;
+    border-top: 1px solid #c0c0c0;
+}
+
+.wc-canvas {
+    display: block;
+    margin: 0 auto;
+    border: 1px solid #c0c0c0;
+    background-color: #f8f8f8;
+}

@@ -123,9 +123,21 @@ services:
       DB_NAME: ${WORDCLOUD_DB_NAME:-wordcloud_db}
       DB_USER: ${WORDCLOUD_DB_USER:-wordcloud_user}
       DB_PASSWORD: ${WORDCLOUD_DB_PASSWORD}
+      WORDCLOUD_DB_HOST: ${MYSQL_HOST:-mysql}
+      WORDCLOUD_DB_PORT: ${MYSQL_PORT:-3306}
+      WORDCLOUD_DB_NAME: ${WORDCLOUD_DB_NAME:-wordcloud_db}
+      WORDCLOUD_DB_USER: ${WORDCLOUD_DB_USER:-wordcloud_user}
+      WORDCLOUD_DB_PASSWORD: ${WORDCLOUD_DB_PASSWORD}
     depends_on:
       mysql:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8003/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - edge
       - data
