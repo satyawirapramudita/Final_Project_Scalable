@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aplikasi Puisi - Monolitik Stateful</title>
+    <title>Aplikasi Puisi - Microservice</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/wordcloud@1.2.3/src/wordcloud2.min.js"></script>
 </head>
@@ -11,7 +11,7 @@
 
 <center>
     <h1>Aplikasi Puisi</h1>
-    <p><b>Backend Monolitik Stateful - Single Path Routing</b></p>
+    <p><b>Microservice Stateless - Event Driven (Nginx Gateway + RabbitMQ)</b></p>
     <p>
         Sesi: <span id="session-info">Memeriksa sesi...</span>
         &nbsp; <button id="btn-logout" class="hidden" type="button">Logout</button>
@@ -103,6 +103,37 @@
         </form>
 
         <p class="message" id="puisi-message"></p>
+
+        <form id="form-search" action="#">
+            <fieldset>
+                <legend><b>Cari Puisi</b></legend>
+                <small>Cari di semua puisi (judul, isi, tag). Contoh: <i>senja laut</i></small><br>
+                <input type="search" id="search-q" name="q" maxlength="200" size="40" placeholder="kata kunci...">
+                <input type="text" id="search-kategori" name="kategori" maxlength="50" size="14" placeholder="kategori (opsional)">
+                <input type="submit" value="Cari" id="btn-search">
+                <span id="search-filter" class="search-filter"></span>
+            </fieldset>
+        </form>
+        <p class="message" id="search-message"></p>
+        <div id="search-results" class="search-results"></div>
+        <p id="search-pager" class="hidden">
+            <button id="btn-search-prev" type="button">&laquo; Sebelumnya</button>
+            <span id="search-page"></span>
+            <button id="btn-search-next" type="button">Berikutnya &raquo;</button>
+        </p>
+
+        <div id="poem-view" class="poem-view hidden">
+            <p align="right"><button id="btn-close-view" type="button">Tutup &times;</button></p>
+            <h2 id="view-judul"></h2>
+            <p id="view-meta" class="view-meta"></p>
+            <p id="view-tags" class="view-tags"></p>
+            <div id="view-isi" class="puisi-isi view-isi"></div>
+            <p><small>Kata bergaris bawah titik-titik adalah <b>Kata Puitif</b>; arahkan kursor untuk melihat definisi KBBI.</small></p>
+            <h4>Kata Puitif &amp; KBBI</h4>
+            <div id="view-kbbi" class="view-kbbi"></div>
+            <h4>Word Cloud</h4>
+            <canvas id="view-wordcloud" class="wc-canvas" width="420" height="260"></canvas>
+        </div>
 
         <h3>Daftar Puisi Saya</h3>
         <button id="btn-refresh" type="button">Muat Ulang</button>

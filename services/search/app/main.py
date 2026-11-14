@@ -79,10 +79,11 @@ def search(
 ) -> dict:
     # Login wajib, tetapi hasil mencakup semua puisi (bukan hanya milik pengguna).
     tokens = tokenize(q)
-    if not tokens:
-        raise HTTPException(status_code=400, detail="Kata kunci pencarian minimal 2 karakter")
     kategori = kategori.strip()[:50]
     tag = clean_tag(tag)
+    # Tanpa kata kunci tetap boleh bila ada filter tag/kategori (klik tag di frontend).
+    if not tokens and not (kategori or tag):
+        raise HTTPException(status_code=400, detail="Kata kunci pencarian minimal 2 karakter")
     # Batas atas melindungi database: satu request tidak boleh menarik terlalu banyak.
     limit = min(max(limit, 1), config.MAX_LIMIT)
     page = min(max(page, 1), config.MAX_PAGE)
@@ -100,7 +101,7 @@ def search(
     try:
         # limit + 1 baris cukup untuk tahu ada halaman berikutnya tanpa COUNT(*) kedua.
         rows = engine.search(
-            match=match_expression(tokens),
+            match=match_expression(tokens) if tokens else None,
             kategori=kategori,
             tag=tag,
             limit=limit + 1,

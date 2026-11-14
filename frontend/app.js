@@ -4,7 +4,10 @@
 //   "https://d1234abcd.cloudfront.net"
 // Kosongkan ("") untuk dev lokal — preview akan diganti placeholder dan submit
 // tetap bisa dilakukan tanpa gambar (gambar_file = "").
-const GENERATOR_BASE_URL = window.location.origin;
+// Di arsitektur microservice gateway tidak meneruskan /fungsi (Lambda Tugas 1), jadi
+// generator gambar NONAKTIF secara default agar tidak ada request 404 setiap mengetik.
+// Aktifkan dengan mendefinisikan window.PUISI_GENERATOR_URL sebelum app.js dimuat.
+const GENERATOR_BASE_URL = window.PUISI_GENERATOR_URL || "";
 
 // Kosongkan: kita panggil Function URL Lambda langsung, bukan lewat path CloudFront /generate-puisi
 const GENERATE_PATH = "/fungsi";
@@ -78,6 +81,9 @@ function showAuth() {
     $("auth-panel").classList.remove("hidden");
     $("app-panel").classList.add("hidden");
     $("grid-puisi").replaceChildren();
+    $("search-results").replaceChildren();
+    $("search-pager").classList.add("hidden");
+    $("poem-view").classList.add("hidden");
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -233,7 +239,7 @@ async function updatePreview() {
     if (!GENERATOR_BASE_URL) {
         // Dev lokal: tampilkan pesan placeholder
         previewEl.style.display = "none";
-        statusEl.textContent = "[Lokal] GENERATOR_BASE_URL belum diatur — preview tidak tersedia.";
+        statusEl.textContent = "Generator gambar tidak aktif — puisi tetap bisa dikirim tanpa gambar.";
         return;
     }
 
@@ -407,6 +413,17 @@ async function loadPuisi() {
             card.appendChild(wcBtn);
             card.appendChild(wcContainer);
 
+            // Tombol buka tampilan lengkap (KBBI + word cloud besar)
+            const openBtn = document.createElement("button");
+            openBtn.type = "button";
+            openBtn.textContent = "📖 Buka + KBBI";
+            openBtn.className = "wc-btn open-btn";
+            openBtn.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                openPoem(p.id);
+            });
+            card.appendChild(openBtn);
+
             card.style.cursor = "pointer";
             card.title = "Klik untuk lihat / sembunyikan isi";
             card.addEventListener("click", () => {
@@ -458,7 +475,9 @@ function switchTab(name) {
  * Mengambil data frekuensi istilah dari backend lalu merender word cloud
  * pada elemen <canvas> yang diberikan.
  */
-async function renderWordCloud(poemId, canvasEl, btnEl) {
+async function renderWordCloud(poemId, canvasEl, btnEl = null) {
+    // Tombol opsional: tampilan lengkap (openPoem) memanggil tanpa tombol.
+    if (!btnEl) btnEl = document.createElement("button");
     btnEl.disabled = true;
     btnEl.textContent = "Memuat…";
     try {
@@ -512,6 +531,225 @@ async function renderWordCloud(poemId, canvasEl, btnEl) {
     }
 }
 
+// ─── Pencarian (search service) ──────────────────────────────────────────────
+const SEARCH_LIMIT = 10;
+let _search = { q: "", kategori: "", tag: "", page: 1 };
+
+function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+}
+
+function startSearch(e) {
+    if (e) e.preventDefault();
+    _search = {
+        q: $("search-q").value.trim(),
+        kategori: $("search-kategori").value.trim(),
+        tag: "",
+        page: 1,
+    };
+    runSearch();
+}
+
+function searchByTag(tag) {
+    $("search-q").value = "";
+    $("search-kategori").value = "";
+    _search = { q: "", kategori: "", tag, page: 1 };
+    runSearch();
+    $("form-search").scrollIntoView({ behavior: "smooth" });
+}
+
+async function runSearch() {
+    const msg = $("search-message");
+    const results = $("search-results");
+    const filter = $("search-filter");
+    filter.textContent = _search.tag ? `Tag: #${_search.tag}` : "";
+
+    if (!_search.q && !_search.kategori && !_search.tag) {
+        showMessage(msg, "Isi kata kunci atau kategori untuk mencari.", true);
+        return;
+    }
+    showMessage(msg, "Mencari...");
+    const qs = new URLSearchParams({ page: _search.page, limit: SEARCH_LIMIT });
+    if (_search.q) qs.set("q", _search.q);
+    if (_search.kategori) qs.set("kategori", _search.kategori);
+    if (_search.tag) qs.set("tag", _search.tag);
+
+    const { status, data } = await api(`search?${qs.toString()}`);
+    results.replaceChildren();
+    $("search-pager").classList.add("hidden");
+
+    if (status === 401) {
+        setToken("");
+        showAuth();
+        return;
+    }
+    if (status !== 200 || !data.ok) {
+        showMessage(msg, data.message || data.detail || "Pencarian gagal, coba lagi.", true);
+        return;
+    }
+    if (!data.items.length) {
+        showMessage(msg, _search.page > 1 ? "Tidak ada hasil lagi." : "Tidak ada puisi yang cocok.");
+        return;
+    }
+    showMessage(msg, `Halaman ${data.page}: ${data.items.length} hasil.`);
+
+    for (const item of data.items) {
+        const row = el("div", "search-item");
+        row.appendChild(el("strong", "", item.judul));
+        if (item.kategori) row.appendChild(el("small", "search-kat", ` — ${item.kategori}`));
+        row.appendChild(el("div", "search-snippet", item.snippet || ""));
+        if (item.tags && item.tags.length) {
+            row.appendChild(el("div", "search-tags", item.tags.map((t) => `#${t}`).join(" ")));
+        }
+        row.title = "Klik untuk membuka puisi";
+        row.addEventListener("click", () => openPoem(item.id));
+        results.appendChild(row);
+    }
+
+    if (data.page > 1 || data.has_more) {
+        $("search-pager").classList.remove("hidden");
+        $("btn-search-prev").disabled = data.page <= 1;
+        $("btn-search-next").disabled = !data.has_more;
+        $("search-page").textContent = ` Halaman ${data.page} `;
+    }
+}
+
+function changeSearchPage(delta) {
+    _search.page = Math.max(1, _search.page + delta);
+    runSearch();
+}
+
+// ─── Tampilan puisi lengkap (poem + kbbi-linker + wordcloud) ────────────────
+let _openPoemId = null;
+
+async function openPoem(poemId) {
+    _openPoemId = poemId;
+    const view = $("poem-view");
+    view.classList.remove("hidden");
+    $("view-judul").textContent = "Memuat...";
+    $("view-meta").textContent = "";
+    $("view-tags").replaceChildren();
+    $("view-isi").replaceChildren();
+    $("view-kbbi").replaceChildren();
+    view.scrollIntoView({ behavior: "smooth" });
+
+    // Tiga layanan dipanggil paralel; masing-masing boleh gagal sendiri.
+    const [poemRes, kbbiRes] = await Promise.all([
+        api(`poems/${poemId}`),
+        api(`kbbi/${poemId}`).catch(() => ({ status: 0, data: {} })),
+    ]);
+    if (_openPoemId !== poemId) return; // user sudah membuka puisi lain
+
+    if (poemRes.status === 401) {
+        setToken("");
+        showAuth();
+        return;
+    }
+    if (poemRes.status !== 200 || !poemRes.data.ok) {
+        $("view-judul").textContent = poemRes.status === 404 ? "Puisi tidak ditemukan" : "Gagal memuat puisi";
+        return;
+    }
+    const p = poemRes.data.puisi;
+    $("view-judul").textContent = p.judul;
+    const tgl = p.tgl_submit ? new Date(p.tgl_submit).toLocaleDateString("id-ID") : "-";
+    const status = p.status === "done" ? "" : ` · analisis: ${p.status}`;
+    $("view-meta").textContent = `${p.kategori || "Tanpa kategori"} · ${tgl}${status}`;
+
+    const tagBox = $("view-tags");
+    for (const t of p.tags || []) {
+        const chip = el("a", "tag-chip", `#${t}`);
+        chip.href = "#";
+        chip.title = "Cari puisi lain dengan tag ini";
+        chip.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            searchByTag(t);
+        });
+        tagBox.appendChild(chip);
+    }
+
+    const kbbi = kbbiRes.status === 200 && kbbiRes.data.ok ? kbbiRes.data : null;
+    renderIsiWithKbbi($("view-isi"), p.isi || "", kbbi ? kbbi.items : []);
+    renderKbbiList($("view-kbbi"), kbbi, kbbiRes.status);
+    renderWordCloud(poemId, $("view-wordcloud"));
+}
+
+function kbbiTooltip(item) {
+    if (!item.found) return `${item.kata_asli}: tidak ditemukan di KBBI`;
+    const head = [item.bentuk_baku || item.normalized_term, item.kelas_kata ? `(${item.kelas_kata})` : ""]
+        .filter(Boolean)
+        .join(" ");
+    const defs = (item.definisi || []).slice(0, 3).map((d, i) => `${i + 1}. ${d}`).join("\n");
+    return defs ? `${head}\n${defs}` : head;
+}
+
+/** Tulis isi puisi dan tandai Kata Puitif dengan tooltip definisi KBBI. */
+function renderIsiWithKbbi(container, isi, items) {
+    container.replaceChildren();
+    const byTerm = new Map();
+    for (const item of items || []) byTerm.set(item.normalized_term, item);
+    if (!byTerm.size) {
+        container.textContent = isi;
+        return;
+    }
+    // Pisah menjadi kata (huruf) dan bukan-kata; spasi & baris baru tetap utuh.
+    for (const part of isi.split(/(\p{L}[\p{L}\p{M}'-]*)/u)) {
+        const item = part ? byTerm.get(part.toLocaleLowerCase("id-ID")) : null;
+        if (item) {
+            const span = el("span", item.found ? "kbbi-word" : "kbbi-word kbbi-missing", part);
+            span.dataset.tip = kbbiTooltip(item);
+            span.tabIndex = 0;
+            container.appendChild(span);
+        } else if (part) {
+            container.appendChild(document.createTextNode(part));
+        }
+    }
+}
+
+function renderKbbiList(container, kbbi, status) {
+    container.replaceChildren();
+    if (!kbbi) {
+        container.appendChild(el("p", "empty", status === 404 ? "Puisi sudah dihapus." : "Layanan KBBI tidak tersedia."));
+        return;
+    }
+    if (kbbi.status === "pending") {
+        container.appendChild(el("p", "empty", "Analisis Kata Puitif belum selesai. Coba buka lagi sebentar."));
+        return;
+    }
+    if (!kbbi.items.length) {
+        container.appendChild(el("p", "empty", "Tidak ada Kata Puitif pada puisi ini."));
+        return;
+    }
+    const dl = el("dl", "kbbi-list");
+    for (const item of kbbi.items) {
+        const dt = el("dt", "", item.kata_asli);
+        if (item.found && item.bentuk_baku && item.bentuk_baku !== item.normalized_term) {
+            dt.appendChild(el("span", "kbbi-baku", ` → ${item.bentuk_baku}`));
+        }
+        if (item.kelas_kata) dt.appendChild(el("i", "kbbi-kelas", ` (${item.kelas_kata})`));
+        dl.appendChild(dt);
+        const dd = el("dd");
+        if (!item.found) {
+            dd.appendChild(el("span", "empty", "Tidak ditemukan di KBBI."));
+        } else if (!(item.definisi || []).length) {
+            dd.appendChild(el("span", "empty", "Definisi tidak tersedia."));
+        } else {
+            const ol = el("ol");
+            for (const d of item.definisi) ol.appendChild(el("li", "", d));
+            dd.appendChild(ol);
+        }
+        dl.appendChild(dd);
+    }
+    container.appendChild(dl);
+}
+
+function closePoem() {
+    _openPoemId = null;
+    $("poem-view").classList.add("hidden");
+}
+
 // ─── Event Listeners ──────────────────────────────────────────────────────────
 $("tab-login").addEventListener("click", () => switchTab("login"));
 $("tab-register").addEventListener("click", () => switchTab("register"));
@@ -520,6 +758,10 @@ $("form-register").addEventListener("submit", register);
 $("btn-logout").addEventListener("click", logout);
 $("form-puisi").addEventListener("submit", submitPuisi);
 $("btn-refresh").addEventListener("click", refreshPuisi);
+$("form-search").addEventListener("submit", startSearch);
+$("btn-search-prev").addEventListener("click", () => changeSearchPage(-1));
+$("btn-search-next").addEventListener("click", () => changeSearchPage(1));
+$("btn-close-view").addEventListener("click", closePoem);
 
 // Trigger preview saat judul, bait, atau template berubah
 $("puisi-judul").addEventListener("input", schedulePreview);
