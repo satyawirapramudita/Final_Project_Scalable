@@ -385,6 +385,28 @@ async function loadPuisi() {
             }
             card.appendChild(detail);
 
+            // Tombol Word Cloud + area kanvas
+            const wcBtn = document.createElement("button");
+            wcBtn.type = "button";
+            wcBtn.textContent = "☁ Word Cloud";
+            wcBtn.className = "wc-btn";
+            const wcContainer = document.createElement("div");
+            wcContainer.className = "wc-container hidden";
+            const wcCanvas = document.createElement("canvas");
+            wcCanvas.width = 280;
+            wcCanvas.height = 200;
+            wcCanvas.className = "wc-canvas";
+            wcContainer.appendChild(wcCanvas);
+            wcBtn.addEventListener("click", (ev) => {
+                ev.stopPropagation(); // jangan toggle detail
+                wcContainer.classList.toggle("hidden");
+                if (!wcContainer.classList.contains("hidden") && !wcCanvas.dataset.loaded) {
+                    renderWordCloud(p.id, wcCanvas, wcBtn);
+                }
+            });
+            card.appendChild(wcBtn);
+            card.appendChild(wcContainer);
+
             card.style.cursor = "pointer";
             card.title = "Klik untuk lihat / sembunyikan isi";
             card.addEventListener("click", () => {
@@ -428,6 +450,66 @@ function switchTab(name) {
     $("tab-register").classList.toggle("active", !isLogin);
     $("form-login").classList.toggle("hidden", !isLogin);
     $("form-register").classList.toggle("hidden", isLogin);
+}
+
+// ─── Word Cloud (wordcloud2.js) ───────────────────────────────────────────────
+
+/**
+ * Mengambil data frekuensi istilah dari backend lalu merender word cloud
+ * pada elemen <canvas> yang diberikan.
+ */
+async function renderWordCloud(poemId, canvasEl, btnEl) {
+    btnEl.disabled = true;
+    btnEl.textContent = "Memuat…";
+    try {
+        const { status, data } = await api(`wordcloud/${poemId}`);
+        if (status === 200 && data.terms && data.terms.length > 0) {
+            // wordcloud2.js membutuhkan array [[kata, bobot], ...]
+            const maxCount = Math.max(...data.terms.map((t) => t.count));
+            const list = data.terms.map((t) => [
+                t.term,
+                Math.max(8, Math.round((t.count / maxCount) * 48)),
+            ]);
+
+            WordCloud(canvasEl, {
+                list: list,
+                gridSize: 6,
+                weightFactor: 1,
+                fontFamily: '"Times New Roman", Times, serif',
+                color: () => {
+                    const palette = [
+                        "#1a237e", "#b71c1c", "#004d40", "#e65100",
+                        "#4a148c", "#006064", "#880e4f", "#33691e",
+                    ];
+                    return palette[Math.floor(Math.random() * palette.length)];
+                },
+                rotateRatio: 0.3,
+                backgroundColor: "#f8f8f8",
+                drawOutOfBound: false,
+            });
+            canvasEl.dataset.loaded = "1";
+            btnEl.textContent = "☁ Word Cloud";
+        } else {
+            // Tidak ada data — tampilkan pesan di canvas
+            const ctx = canvasEl.getContext("2d");
+            ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+            ctx.font = '13px "Times New Roman", Times, serif';
+            ctx.fillStyle = "#555";
+            ctx.textAlign = "center";
+            ctx.fillText(
+                "Belum ada data word cloud.",
+                canvasEl.width / 2,
+                canvasEl.height / 2
+            );
+            canvasEl.dataset.loaded = "1";
+            btnEl.textContent = "☁ Word Cloud";
+        }
+    } catch (err) {
+        btnEl.textContent = "☁ Gagal memuat";
+        console.error("renderWordCloud error:", err);
+    } finally {
+        btnEl.disabled = false;
+    }
 }
 
 // ─── Event Listeners ──────────────────────────────────────────────────────────
