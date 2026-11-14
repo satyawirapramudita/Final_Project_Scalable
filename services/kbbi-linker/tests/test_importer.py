@@ -23,6 +23,18 @@ def test_importer_splits_non_standard_forms_conservatively() -> None:
     ]
 
 
+def test_canonical_form_ignores_syllable_dots() -> None:
+    assert module.canonical_form("senja", "sen.ja") == "senja"
+    assert module.canonical_form("bala bulan", "ba.la.bu.lan") == "bala bulan"
+    assert module.canonical_form("-an", "-an") == "-an"
+    # Nama yang benar-benar berbeda (singkatan diuraikan) tetap dipakai.
+    assert (
+        module.canonical_form("(spt) abu di atas tanggul", "(seperti) abu di atas tanggul")
+        == "(seperti) abu di atas tanggul"
+    )
+    assert module.canonical_form("senja", "") == "senja"
+
+
 def test_first_definition_for_entry_removes_stale_rows() -> None:
     class Cursor:
         def __init__(self):
