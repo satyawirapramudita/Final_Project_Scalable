@@ -27,6 +27,22 @@ def aliases(value: str) -> list[str]:
     return [part.strip() for part in re.split(r"[,;]", value) if part.strip()]
 
 
+def canonical_form(key: str, nama: str) -> str:
+    """Bentuk baku untuk ditampilkan.
+
+    Di KBBI V, kolom `nama` untuk kata biasa berisi pemenggalan suku kata
+    ("sen.ja", "ang.ga.na.se.kar"), bukan bentuk baku. Bila `nama` hanya
+    `key` plus titik suku kata, pakai `key`. Bila benar-benar berbeda (mis.
+    singkatan pada peribahasa: "dng" -> "dengan"), pakai `nama`.
+    """
+    key, nama = (key or "").strip(), (nama or "").strip()
+    if not nama:
+        return key[:100]
+    if key and re.sub(r"[.\s]", "", nama) == re.sub(r"\s", "", key):
+        return key[:100]
+    return nama[:100]
+
+
 def next_definition_order(cursor, orders: dict[str, int], key: str, entry_id: int) -> int:
     """Reset stale definitions once, then allocate stable order within this import."""
     if key not in orders:
@@ -59,7 +75,7 @@ def import_csv(path: str, version: str, commit_every: int = 1_000) -> tuple[int,
 
             for row_number, row in enumerate(reader, start=1):
                 lookup = normalize(row["key"] or row["nama"])
-                canonical = (row["nama"] or row["key"]).strip()[:100]
+                canonical = canonical_form(row["key"], row["nama"])
                 if not lookup or not canonical:
                     continue
                 forms = [(lookup, row["key"].strip()[:100] or canonical)]
