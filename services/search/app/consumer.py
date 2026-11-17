@@ -66,6 +66,8 @@ def _apply(name: str, payload: dict, at: datetime) -> tuple[str, int | None]:
             judul=_required_text(payload, "judul", 150),
             isi=_required_text(payload, "isi", 10_000),
             kategori=_required_text(payload, "kategori", 50),
+            # Tanpa field (event lama) -> publik; nilai aneh -> privat (gagal tertutup).
+            visibilitas=events.parse_visibility(payload.get("visibilitas")),
             at=at,
         )
     if name == events.POEM_ANALYZED:

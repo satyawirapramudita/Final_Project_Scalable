@@ -9,7 +9,7 @@ Broker: **RabbitMQ**, satu topic exchange `poem.events`. Setiap konsumen punya q
 
 | Routing key | Producer | Konsumen (queue) | Payload inti |
 |---|---|---|---|
-| `poem.created` | poem (Satya) | nlp.q (Satya), search.q (Anders) | `event_id, correlation_id, poem_id, user_id, judul, isi, kategori, occurred_at` |
+| `poem.created` | poem (Satya) | nlp.q (Satya), search.q (Anders) | `event_id, correlation_id, poem_id, user_id, judul, isi, kategori, visibilitas, occurred_at` |
 | `poem.updated` | poem (Satya) | nlp.q (Satya), search.q (Anders) | sama dengan `poem.created` |
 | `poem.deleted` | poem (Satya) | search.q (Anders), wordcloud.q (Lindra), kbbi.q (Dzaky) | `event_id, poem_id, occurred_at` |
 | `poem.analyzed` | nlp-worker (Satya) | poem.q (Satya), wordcloud.q (Lindra), kbbi.q (Dzaky), search.q (Anders) | `event_id, correlation_id, poem_id, tags[], kata_puitif[], terms[{term,count}], occurred_at` |
@@ -18,6 +18,22 @@ Broker: **RabbitMQ**, satu topic exchange `poem.events`. Setiap konsumen punya q
 memori RabbitMQ saat uji beban; tambahkan `QUEUE_TTS` ke `BINDINGS` di `shared/events.py` begitu
 layanan tts punya konsumen. Broker yang sudah berjalan masih menyimpan antrean lama; hapus sekali dengan
 `docker compose exec rabbitmq rabbitmqctl delete_queue tts.q`.
+
+## Visibilitas puisi (`visibilitas`)
+
+Ditambahkan secara *additive* ke `poem.created` dan `poem.updated`: `"public"` atau `"private"`.
+
+- Field tidak ada (event lama) berarti **publik**: semua puisi sebelum fitur ini memang publik.
+- Nilai yang tidak dikenal diperlakukan sebagai **privat** (gagal tertutup). Pakai
+  `shared.events.parse_visibility()` agar semua konsumen konsisten.
+- Puisi privat hanya boleh terlihat oleh pemiliknya (`user_id`). Pengguna lain mendapat
+  **404**, bukan 403, agar keberadaannya tidak terungkap.
+- `poem.analyzed` **tidak** membawa visibilitas. Data turunan (word cloud, KBBI) dilindungi di
+  **gateway**: sebelum meneruskan `/api/wordcloud/{id}` dan `/api/kbbi/{id}`, Nginx memanggil
+  `GET /internal/poems/{id}/access` di layanan poem (`auth_request`). Layanan wordcloud dan
+  kbbi-linker tidak perlu tahu soal visibilitas.
+- search menyimpan visibilitas bersama konten (cap waktu `content_at` yang sama), menyaring
+  `visibilitas = 'public' OR user_id = <pengguna>` di SQL, dan memasukkan id pengguna ke kunci cache.
 
 ## Amplop standar
 

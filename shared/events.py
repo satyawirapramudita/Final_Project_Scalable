@@ -6,6 +6,9 @@ Modul ini SENGAJA tanpa dependensi eksternal agar mudah di-vendor
 ke tiap service.
 
 Lihat docs/event-contracts.md untuk tabel lengkap.
+
+Catatan: setiap service punya salinan modul ini di image-nya (di-COPY saat
+build), jadi perubahan di sini butuh `docker compose up -d --build`.
 """
 
 from __future__ import annotations
@@ -72,6 +75,23 @@ class EventEnvelope:
         return asdict(self)
 
 
+# ── Visibilitas puisi ─────────────────────────────────────────
+# Ditambahkan secara additive: event lama tanpa field ini berarti publik
+# (semua puisi sebelum fitur ini memang publik).
+VISIBILITY_PUBLIC = "public"
+VISIBILITY_PRIVATE = "private"
+VISIBILITIES = (VISIBILITY_PUBLIC, VISIBILITY_PRIVATE)
+
+
+def parse_visibility(value: Any) -> str:
+    """Nilai visibilitas dari payload. Kosong -> publik (event lama);
+    nilai tidak dikenal -> privat (gagal tertutup, jangan sampai bocor)."""
+    if value is None or value == "":
+        return VISIBILITY_PUBLIC
+    value = str(value).strip().lower()
+    return value if value in VISIBILITIES else VISIBILITY_PRIVATE
+
+
 # ── Payload helper ────────────────────────────────────────────
 
 
@@ -82,6 +102,7 @@ def poem_created_payload(
     judul: str,
     isi: str,
     kategori: str,
+    visibilitas: str = VISIBILITY_PUBLIC,
 ) -> dict[str, Any]:
     return {
         "poem_id": poem_id,
@@ -89,6 +110,7 @@ def poem_created_payload(
         "judul": judul,
         "isi": isi,
         "kategori": kategori,
+        "visibilitas": visibilitas,
     }
 
 

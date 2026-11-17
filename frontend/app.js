@@ -285,6 +285,7 @@ async function submitPuisi(e) {
             isi: $("puisi-isi").value.trim(),
             bait: bait,
             gambar_file: gambar_file,
+            visibilitas: $("vis-private").checked ? "private" : "public",
         });
 
         if (status === 201 && data.ok) {
@@ -369,6 +370,8 @@ async function loadPuisi() {
             kat.textContent = p.kategori || "";
             info.appendChild(kat);
 
+            info.appendChild(visibilityBadge(p.visibilitas));
+
             const hint = document.createElement("small");
             hint.textContent = "Klik untuk lihat isi";
             hint.style.fontStyle = "italic";
@@ -394,7 +397,7 @@ async function loadPuisi() {
             // Tombol Word Cloud + area kanvas
             const wcBtn = document.createElement("button");
             wcBtn.type = "button";
-            wcBtn.textContent = "☁ Word Cloud";
+            wcBtn.textContent = "Word Cloud";
             wcBtn.className = "wc-btn";
             const wcContainer = document.createElement("div");
             wcContainer.className = "wc-container hidden";
@@ -416,13 +419,24 @@ async function loadPuisi() {
             // Tombol buka tampilan lengkap (KBBI + word cloud besar)
             const openBtn = document.createElement("button");
             openBtn.type = "button";
-            openBtn.textContent = "📖 Buka + KBBI";
+            openBtn.textContent = "Buka + KBBI";
             openBtn.className = "wc-btn open-btn";
             openBtn.addEventListener("click", (ev) => {
                 ev.stopPropagation();
                 openPoem(p.id);
             });
             card.appendChild(openBtn);
+
+            // Ganti visibilitas (publik <-> privat) lewat PUT /api/poems/{id}
+            const visBtn = document.createElement("button");
+            visBtn.type = "button";
+            visBtn.className = "wc-btn vis-btn";
+            visBtn.textContent = isPrivate(p.visibilitas) ? "Jadikan Publik" : "Jadikan Privat";
+            visBtn.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                toggleVisibility(p, visBtn);
+            });
+            card.appendChild(visBtn);
 
             card.style.cursor = "pointer";
             card.title = "Klik untuk lihat / sembunyikan isi";
@@ -438,6 +452,47 @@ async function loadPuisi() {
         showAuth();
     }
     return false;
+}
+
+// ─── Visibilitas puisi ────────────────────────────────────────────────────────
+function isPrivate(visibilitas) {
+    return visibilitas === "private";
+}
+
+function visibilityBadge(visibilitas) {
+    const badge = document.createElement("small");
+    badge.className = isPrivate(visibilitas) ? "vis-badge vis-private" : "vis-badge vis-public";
+    badge.textContent = isPrivate(visibilitas) ? "[Privat]" : "[Publik]";
+    badge.title = isPrivate(visibilitas)
+        ? "Hanya Anda yang bisa melihat puisi ini"
+        : "Semua pengguna bisa mencari dan membaca puisi ini";
+    return badge;
+}
+
+async function toggleVisibility(p, button) {
+    const target = isPrivate(p.visibilitas) ? "public" : "private";
+    const label = target === "private" ? "privat (hanya Anda)" : "publik (semua pengguna)";
+    if (!confirm(`Jadikan puisi "${p.judul}" ${label}?`)) return;
+
+    button.disabled = true;
+    try {
+        const { status, data } = await api(`poems/${p.id}`, "PUT", { visibilitas: target });
+        if (status === 200 && data.ok) {
+            showMessage(
+                $("puisi-message"),
+                target === "private" ? "Puisi sekarang privat." : "Puisi sekarang publik.",
+                false
+            );
+            loadPuisi();
+        } else if (status === 401) {
+            setToken("");
+            showAuth();
+        } else {
+            showMessage($("puisi-message"), data.message || data.detail || "Gagal mengubah visibilitas", true);
+        }
+    } finally {
+        button.disabled = false;
+    }
 }
 
 function flashMessage() {
@@ -507,7 +562,7 @@ async function renderWordCloud(poemId, canvasEl, btnEl = null) {
                 drawOutOfBound: false,
             });
             canvasEl.dataset.loaded = "1";
-            btnEl.textContent = "☁ Word Cloud";
+            btnEl.textContent = "Word Cloud";
         } else {
             // Tidak ada data — tampilkan pesan di canvas
             const ctx = canvasEl.getContext("2d");
@@ -521,10 +576,10 @@ async function renderWordCloud(poemId, canvasEl, btnEl = null) {
                 canvasEl.height / 2
             );
             canvasEl.dataset.loaded = "1";
-            btnEl.textContent = "☁ Word Cloud";
+            btnEl.textContent = "Word Cloud";
         }
     } catch (err) {
-        btnEl.textContent = "☁ Gagal memuat";
+        btnEl.textContent = "Gagal memuat";
         console.error("renderWordCloud error:", err);
     } finally {
         btnEl.disabled = false;
@@ -599,6 +654,7 @@ async function runSearch() {
     for (const item of data.items) {
         const row = el("div", "search-item");
         row.appendChild(el("strong", "", item.judul));
+        if (isPrivate(item.visibilitas)) row.appendChild(el("small", "vis-badge vis-private", " [Privat]"));
         if (item.kategori) row.appendChild(el("small", "search-kat", ` — ${item.kategori}`));
         row.appendChild(el("div", "search-snippet", item.snippet || ""));
         if (item.tags && item.tags.length) {
@@ -656,7 +712,8 @@ async function openPoem(poemId) {
     $("view-judul").textContent = p.judul;
     const tgl = p.tgl_submit ? new Date(p.tgl_submit).toLocaleDateString("id-ID") : "-";
     const status = p.status === "done" ? "" : ` · analisis: ${p.status}`;
-    $("view-meta").textContent = `${p.kategori || "Tanpa kategori"} · ${tgl}${status}`;
+    const vis = isPrivate(p.visibilitas) ? " · Privat" : "";
+    $("view-meta").textContent = `${p.kategori || "Tanpa kategori"} · ${tgl}${status}${vis}`;
 
     const tagBox = $("view-tags");
     for (const t of p.tags || []) {

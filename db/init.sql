@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS puisi (
     gambar_file VARCHAR(255) NULL,
     status      VARCHAR(20)  NOT NULL DEFAULT 'pending',  -- pending | done
     versi       INT          NOT NULL DEFAULT 1,
-    updated_at  DATETIME     NULL
+    updated_at  DATETIME     NULL,
+    visibilitas VARCHAR(10)  NOT NULL DEFAULT 'public'  -- public | private
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
 -- Read model tag hasil analisis (diisi dari event poem.analyzed)

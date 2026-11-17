@@ -40,7 +40,7 @@ def main(ids: list[int]) -> None:
         charset="utf8mb4",
     )
     with db.cursor() as cur:
-        sql = "SELECT id, user_id, judul, isi, kategori, keyword FROM puisi"
+        sql = "SELECT id, user_id, judul, isi, kategori, keyword, visibilitas FROM puisi"
         if ids:
             cur.execute(sql + f" WHERE id IN ({','.join(['%s'] * len(ids))})", ids)
         else:
@@ -67,6 +67,7 @@ def main(ids: list[int]) -> None:
             judul=poem["judul"],
             isi=poem["isi"],
             kategori=poem["kategori"] or "",
+            visibilitas=events.parse_visibility(poem["visibilitas"]),
         )
         payload["keyword"] = poem.get("keyword") or ""
         envelope = {

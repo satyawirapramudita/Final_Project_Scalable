@@ -56,6 +56,12 @@ def main() -> None:
     parser.add_argument("--start-id", type=int, default=100000)
     parser.add_argument("--no-analyze", action="store_true", help="jangan kirim poem.analyzed")
     parser.add_argument("--via-exchange", action="store_true", help="lewat poem.events, bukan langsung ke search.q")
+    parser.add_argument(
+        "--private-ratio",
+        type=float,
+        default=0.0,
+        help="porsi puisi privat, 0..1 (mis. 0.15 untuk uji beban yang realistis)",
+    )
     args = parser.parse_args()
 
     conn = connect(
@@ -85,13 +91,23 @@ def main() -> None:
             ch.basic_publish("", events.QUEUE_SEARCH, data, props)
 
     rng = random.Random(42)
+    # Generator terpisah agar isi puisi tetap sama berapa pun --private-ratio.
+    vis_rng = random.Random(7)
+    private = 0
     for i in range(args.count):
         poem_id = args.start_id + i
         judul, isi, kategori, tags = make_poem(rng)
+        is_private = vis_rng.random() < args.private_ratio
+        private += is_private
         send(
             events.POEM_CREATED,
             events.poem_created_payload(
-                poem_id=poem_id, user_id=args.user, judul=judul, isi=isi, kategori=kategori
+                poem_id=poem_id,
+                user_id=args.user,
+                judul=judul,
+                isi=isi,
+                kategori=kategori,
+                visibilitas=events.VISIBILITY_PRIVATE if is_private else events.VISIBILITY_PUBLIC,
             ),
         )
         if not args.no_analyze:
@@ -102,7 +118,9 @@ def main() -> None:
     conn.close()
     sent = args.count * (1 if args.no_analyze else 2)
     target = "poem.events" if args.via_exchange else events.QUEUE_SEARCH
-    print(f"{sent} event untuk {args.count} puisi (user {args.user}) dikirim ke {target}")
+    print(
+        f"{sent} event untuk {args.count} puisi (user {args.user}, {private} privat) dikirim ke {target}"
+    )
 
 
 if __name__ == "__main__":

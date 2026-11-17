@@ -26,9 +26,17 @@ class SearchEngine(ABC):
 
     @abstractmethod
     def apply_content(
-        self, *, poem_id: int, user_id: int, judul: str, isi: str, kategori: str, at: datetime
+        self,
+        *,
+        poem_id: int,
+        user_id: int,
+        judul: str,
+        isi: str,
+        kategori: str,
+        visibilitas: str,
+        at: datetime,
     ) -> tuple[str, int | None]:
-        """poem.created / poem.updated."""
+        """poem.created / poem.updated. Visibilitas ikut cap waktu konten."""
 
     @abstractmethod
     def apply_analysis(self, *, poem_id: int, tags: str, at: datetime) -> tuple[str, int | None]:
@@ -45,11 +53,13 @@ class SearchEngine(ABC):
         match: str | None,
         kategori: str,
         tag: str,
+        viewer_id: int,
         limit: int,
         offset: int,
     ) -> list[dict[str, Any]]:
         """Kembalikan hingga `limit` baris, diurut relevansi.
 
+        Hanya puisi publik ditambah puisi privat milik `viewer_id`.
         `match` None berarti tanpa kata kunci: hanya filter kategori/tag, urut terbaru."""
 
 
@@ -68,7 +78,7 @@ class MySQLEngine(SearchEngine):
         )
         return cur.fetchone()
 
-    def apply_content(self, *, poem_id, user_id, judul, isi, kategori, at):
+    def apply_content(self, *, poem_id, user_id, judul, isi, kategori, visibilitas, at):
         with db.pool.connection() as conn:
             conn.begin()
             with conn.cursor() as cur:
@@ -78,8 +88,8 @@ class MySQLEngine(SearchEngine):
                     return IGNORED, row["user_id"]
                 cur.execute(
                     "UPDATE search_poem SET user_id = %s, judul = %s, isi = %s, "
-                    "kategori = %s, content_at = %s WHERE poem_id = %s",
-                    (user_id, judul, isi, kategori, at, poem_id),
+                    "kategori = %s, visibilitas = %s, content_at = %s WHERE poem_id = %s",
+                    (user_id, judul, isi, kategori, visibilitas, at, poem_id),
                 )
             conn.commit()
         return APPLIED, user_id
@@ -119,8 +129,11 @@ class MySQLEngine(SearchEngine):
 
     # ── Pencarian ────────────────────────────────────────────
 
-    def search(self, *, match, kategori, tag, limit, offset):
-        cols = "SELECT poem_id, user_id, judul, SUBSTRING(isi, 1, 1500) AS isi, kategori, tags, "
+    def search(self, *, match, kategori, tag, viewer_id, limit, offset):
+        cols = (
+            "SELECT poem_id, user_id, judul, SUBSTRING(isi, 1, 1500) AS isi, kategori, tags, "
+            "visibilitas, "
+        )
         if match:
             sql = (
                 cols + "MATCH(judul, isi, tags) AGAINST (%s IN BOOLEAN MODE) AS score "
@@ -132,6 +145,10 @@ class MySQLEngine(SearchEngine):
             # Hanya filter tag/kategori (klik tag di frontend): urut dari yang terbaru.
             sql = cols + "0 AS score FROM search_poem WHERE deleted = 0 AND judul IS NOT NULL"
             params = []
+        # Puisi privat hanya terlihat oleh pemiliknya. Disaring di SQL (bukan
+        # setelah query) agar LIMIT/OFFSET dan has_more tetap benar.
+        sql += " AND (visibilitas = 'public' OR user_id = %s)"
+        params.append(viewer_id)
         if kategori:
             sql += " AND kategori = %s"
             params.append(kategori)

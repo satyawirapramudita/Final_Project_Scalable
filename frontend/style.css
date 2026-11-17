@@ -372,6 +372,28 @@ p.empty {
     color: #555555;
 }
 
+/* Visibilitas puisi */
+.vis-badge {
+    font-size: 11px;
+}
+
+.vis-private {
+    color: #8a4b00;
+    font-weight: bold;
+}
+
+.vis-public {
+    color: #33691e;
+}
+
+.vis-btn {
+    background-color: #fff8e1;
+}
+
+.vis-btn:hover {
+    background-color: #ffecb3;
+}
+
 .open-btn {
     background-color: #efe;
 }

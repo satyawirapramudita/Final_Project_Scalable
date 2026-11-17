@@ -63,6 +63,11 @@
                 <input type="text" id="puisi-judul" name="judul" required maxlength="150" size="50"><br><br>
                 Kategori: <br>
                 <input type="text" id="puisi-kategori" name="kategori" required maxlength="50" size="50" placeholder="contoh: Alam, Cinta, Persahabatan"><br><br>
+                Visibilitas: <br>
+                <label><input type="radio" name="visibilitas" id="vis-public" value="public" checked> Publik</label>
+                &nbsp;
+                <label><input type="radio" name="visibilitas" id="vis-private" value="private"> Privat</label><br>
+                <small>Publik: bisa dicari dan dibaca semua pengguna. Privat: hanya Anda.</small><br><br>
                 Keywords (opsional): <br>
                 <input type="text" id="puisi-keyword" name="keyword" maxlength="255" size="50" placeholder="pisahkan dengan koma"><br><br>
                 Isi Puisi: <br>
@@ -107,7 +112,7 @@
         <form id="form-search" action="#">
             <fieldset>
                 <legend><b>Cari Puisi</b></legend>
-                <small>Cari di semua puisi (judul, isi, tag). Contoh: <i>senja laut</i></small><br>
+                <small>Cari di semua puisi publik dan puisi privat Anda (judul, isi, tag). Contoh: <i>senja laut</i></small><br>
                 <input type="search" id="search-q" name="q" maxlength="200" size="40" placeholder="kata kunci...">
                 <input type="text" id="search-kategori" name="kategori" maxlength="50" size="14" placeholder="kategori (opsional)">
                 <input type="submit" value="Cari" id="btn-search">

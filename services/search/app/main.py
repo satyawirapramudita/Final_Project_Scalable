@@ -75,9 +75,13 @@ def search(
     tag: str = Query(""),
     page: int = Query(1),
     limit: int = Query(config.DEFAULT_LIMIT),
-    _user: dict = Depends(current_user),
+    user: dict = Depends(current_user),
 ) -> dict:
-    # Login wajib, tetapi hasil mencakup semua puisi (bukan hanya milik pengguna).
+    # Login wajib. Hasil: semua puisi publik + puisi privat milik pengguna ini.
+    try:
+        viewer_id = int(user["sub"])
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Token tidak valid")
     tokens = tokenize(q)
     kategori = kategori.strip()[:50]
     tag = clean_tag(tag)
@@ -88,8 +92,13 @@ def search(
     limit = min(max(limit, 1), config.MAX_LIMIT)
     page = min(max(page, 1), config.MAX_PAGE)
 
+    # viewer_id ikut kunci cache: hasil berbeda per pengguna karena puisi privat
+    # milik sendiri ikut tampil. Tanpa ini, hasil berisi puisi privat seseorang
+    # bisa tersaji dari cache ke pengguna lain.
     digest = hashlib.sha1(
-        "|".join([" ".join(tokens), kategori.lower(), tag, str(page), str(limit)]).encode("utf-8")
+        "|".join(
+            [str(viewer_id), " ".join(tokens), kategori.lower(), tag, str(page), str(limit)]
+        ).encode("utf-8")
     ).hexdigest()
 
     cached, version = cache.lookup(digest)
@@ -104,6 +113,7 @@ def search(
             match=match_expression(tokens) if tokens else None,
             kategori=kategori,
             tag=tag,
+            viewer_id=viewer_id,
             limit=limit + 1,
             offset=(page - 1) * limit,
         )
@@ -129,6 +139,7 @@ def search(
                 "snippet": make_snippet(row["isi"], tokens),
                 "kategori": row["kategori"],
                 "tags": split_tags(row["tags"]),
+                "visibilitas": row["visibilitas"],
                 "score": round(float(row["score"]), 4),
             }
             for row in rows[:limit]

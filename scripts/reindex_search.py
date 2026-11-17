@@ -54,7 +54,10 @@ def main() -> None:
         charset="utf8mb4",
     )
     with db.cursor() as cur:
-        cur.execute("SELECT id, user_id, judul, isi, kategori, status, tgl_submit, updated_at FROM puisi")
+        cur.execute(
+            "SELECT id, user_id, judul, isi, kategori, visibilitas, status, tgl_submit, updated_at "
+            "FROM puisi"
+        )
         poems = cur.fetchall()
         cur.execute("SELECT puisi_id, tag FROM puisi_tag ORDER BY tag")
         tag_rows = cur.fetchall()
@@ -93,6 +96,7 @@ def main() -> None:
                 judul=poem["judul"],
                 isi=poem["isi"],
                 kategori=poem["kategori"],
+                visibilitas=events.parse_visibility(poem["visibilitas"]),
             ),
             at,
         )

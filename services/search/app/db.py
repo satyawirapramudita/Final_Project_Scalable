@@ -37,10 +37,18 @@ DDL = [
         deleted    TINYINT(1)   NOT NULL DEFAULT 0,
         content_at DATETIME(6)  NULL,
         tags_at    DATETIME(6)  NULL,
+        visibilitas VARCHAR(10) NOT NULL DEFAULT 'public',
         KEY idx_user (user_id, deleted),
         FULLTEXT KEY ft_search (judul, isi, tags)
     ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci
     """,
+]
+
+# Kolom yang ditambahkan setelah tabel pertama kali dibuat (volume lama).
+# MySQL 8 tidak punya ADD COLUMN IF NOT EXISTS, jadi dicek lewat information_schema.
+# Baris lama otomatis 'public', sesuai perilaku sebelum fitur visibilitas.
+MIGRATIONS = [
+    ("search_poem", "visibilitas", "VARCHAR(10) NOT NULL DEFAULT 'public'"),
 ]
 
 _IDLE_PING_AFTER = 30  # detik; koneksi yang lama menganggur dicek dulu
@@ -164,6 +172,16 @@ def init_schema(retries: int = 30, delay: int = 2) -> None:
                 with conn.cursor() as cur:
                     for stmt in DDL:
                         cur.execute(stmt)
+                    for table, column, definition in MIGRATIONS:
+                        cur.execute(
+                            "SELECT COUNT(*) AS n FROM information_schema.COLUMNS "
+                            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s "
+                            "AND COLUMN_NAME = %s",
+                            (table, column),
+                        )
+                        if cur.fetchone()["n"] == 0:
+                            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+                            log.info("Migrasi: kolom %s.%s ditambahkan", table, column)
             log.info("Skema search_db siap")
             return
         except Exception as exc:  # noqa: BLE001

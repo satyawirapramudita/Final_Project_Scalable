@@ -9,6 +9,7 @@ import logging
 import re
 import time
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
@@ -35,6 +36,9 @@ REQUEST_COUNT = Counter(
 # ── Model ─────────────────────────────────────────────────────
 
 
+Visibility = Literal["public", "private"]
+
+
 class PoemCreate(BaseModel):
     judul: str
     isi: str
@@ -42,6 +46,8 @@ class PoemCreate(BaseModel):
     keyword: str | None = None
     bait: str | None = None
     gambar_file: str | None = None
+    # Default publik: klien lama yang tidak mengirim field ini tetap berperilaku sama.
+    visibilitas: Visibility = "public"
 
 
 class PoemUpdate(BaseModel):
@@ -51,6 +57,7 @@ class PoemUpdate(BaseModel):
     keyword: str | None = None
     bait: str | None = None
     gambar_file: str | None = None
+    visibilitas: Visibility | None = None
 
 
 # ── Helper ────────────────────────────────────────────────────
@@ -128,8 +135,33 @@ def _serialize(row: dict, tags: list[str]) -> dict:
         "versi": row["versi"],
         "tgl_submit": row["tgl_submit"].isoformat() if row.get("tgl_submit") else None,
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
+        "visibilitas": events.parse_visibility(row.get("visibilitas")),
         "tags": tags,
     }
+
+
+def _can_read(item: dict, user_id: int) -> bool:
+    """Puisi publik boleh dibaca semua pengguna yang login; puisi privat hanya pemiliknya.
+    Entri cache lama tanpa field visibilitas berasal dari sebelum fitur ini (= publik)."""
+    if events.parse_visibility(item.get("visibilitas")) == events.VISIBILITY_PUBLIC:
+        return True
+    return int(item["user_id"]) == user_id
+
+
+def _load_item(poem_id: int) -> tuple[dict, bool]:
+    """Detail puisi lewat cache-aside. Kembalikan (item, dari_cache).
+
+    Cache menyimpan puisi apa adanya (termasuk yang privat); pemeriksaan akses
+    selalu dilakukan SETELAH lookup, jadi isi cache tidak pernah bocor."""
+    key = f"cache:puisi:{poem_id}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached, True
+    row = _get_row(poem_id)
+    tags = _tags_for([poem_id]).get(poem_id, [])
+    item = _serialize(row, tags)
+    cache.set(key, item, config.CACHE_TTL_DETAIL)
+    return item, False
 
 
 def _invalidate(user_id: int, poem_id: int | None = None) -> None:
@@ -222,6 +254,7 @@ def create_poem(body: PoemCreate, request: Request, user: dict = Depends(current
     keyword = _clean(body.keyword, 255)
     bait = _clean(body.bait, 500)
     gambar_file = _clean(body.gambar_file, 255)
+    visibilitas = body.visibilitas
     _validate_fields(judul, isi, kategori, gambar_file)
 
     conn = db.connect()
@@ -229,9 +262,10 @@ def create_poem(body: PoemCreate, request: Request, user: dict = Depends(current
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO puisi "
-                "(user_id, judul, tgl_submit, isi, bait, kategori, keyword, gambar_file, status, versi) "
-                "VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s, 'pending', 1)",
-                (user_id, judul, isi, bait, kategori, keyword, gambar_file),
+                "(user_id, judul, tgl_submit, isi, bait, kategori, keyword, gambar_file, "
+                "status, versi, visibilitas) "
+                "VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s, 'pending', 1, %s)",
+                (user_id, judul, isi, bait, kategori, keyword, gambar_file, visibilitas),
             )
             poem_id = cur.lastrowid
     finally:
@@ -240,12 +274,17 @@ def create_poem(body: PoemCreate, request: Request, user: dict = Depends(current
     messaging.publish(
         events.POEM_CREATED,
         events.poem_created_payload(
-            poem_id=poem_id, user_id=user_id, judul=judul, isi=isi, kategori=kategori
+            poem_id=poem_id,
+            user_id=user_id,
+            judul=judul,
+            isi=isi,
+            kategori=kategori,
+            visibilitas=visibilitas,
         ),
         request.headers.get("X-Request-ID"),
     )
     _invalidate(user_id, poem_id)
-    return {"ok": True, "id_puisi": poem_id, "status": "pending"}
+    return {"ok": True, "id_puisi": poem_id, "status": "pending", "visibilitas": visibilitas}
 
 
 @app.get("/api/poems")
@@ -273,19 +312,34 @@ def list_poems(user: dict = Depends(current_user)) -> dict:
 
 
 @app.get("/api/poems/{poem_id}")
-def get_poem(poem_id: int, _user: dict = Depends(current_user)) -> dict:
-    # Puisi bersifat publik untuk dibaca oleh pengguna yang login (hasil pencarian
-    # mencakup semua puisi). Mengubah dan menghapus tetap hanya untuk pemilik.
-    key = f"cache:puisi:{poem_id}"
-    cached = cache.get(key)
-    if cached is not None:
-        return {"ok": True, "puisi": cached, "cached": True}
-
-    row = _get_row(poem_id)
-    tags = _tags_for([poem_id]).get(poem_id, [])
-    item = _serialize(row, tags)
-    cache.set(key, item, config.CACHE_TTL_DETAIL)
+def get_poem(poem_id: int, user: dict = Depends(current_user)) -> dict:
+    # Puisi publik dapat dibaca semua pengguna yang login; puisi privat hanya
+    # pemiliknya. Pengguna lain mendapat 404 (bukan 403) agar keberadaan puisi
+    # privat tidak terungkap. Mengubah dan menghapus tetap hanya untuk pemilik.
+    item, from_cache = _load_item(poem_id)
+    if not _can_read(item, int(user["sub"])):
+        raise HTTPException(status_code=404, detail="Puisi tidak ditemukan")
+    if from_cache:
+        return {"ok": True, "puisi": item, "cached": True}
     return {"ok": True, "puisi": item}
+
+
+@app.get("/internal/poems/{poem_id}/access", status_code=204)
+def check_access(poem_id: int, user: dict = Depends(current_user)) -> Response:
+    """Dipakai gateway (auth_request) sebelum meneruskan /api/wordcloud/{id} dan
+    /api/kbbi/{id}, sehingga data turunan puisi privat ikut terlindungi tanpa
+    mengubah layanan wordcloud/kbbi-linker.
+
+    204 = boleh. 403 = tidak boleh atau puisi tidak ada (gateway mengubahnya
+    menjadi 404). auth_request hanya mengenali 2xx/401/403; kode lain dianggap error.
+    Path /internal/ diblokir gateway untuk klien luar."""
+    try:
+        item, _ = _load_item(poem_id)
+    except HTTPException:
+        return Response(status_code=403)
+    if not _can_read(item, int(user["sub"])):
+        return Response(status_code=403)
+    return Response(status_code=204)
 
 
 @app.put("/api/poems/{poem_id}")
@@ -304,6 +358,7 @@ def update_poem(
     keyword = _clean(fields.get("keyword", row["keyword"]), 255)
     bait = _clean(fields.get("bait", row["bait"]), 500)
     gambar_file = _clean(fields.get("gambar_file", row["gambar_file"]), 255)
+    visibilitas = fields.get("visibilitas") or events.parse_visibility(row.get("visibilitas"))
     _validate_fields(judul, isi, kategori, gambar_file)
 
     conn = db.connect()
@@ -311,21 +366,29 @@ def update_poem(
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE puisi SET judul=%s, isi=%s, bait=%s, kategori=%s, keyword=%s, "
-                "gambar_file=%s, status='pending', versi=versi+1, updated_at=NOW() WHERE id=%s",
-                (judul, isi, bait, kategori, keyword, gambar_file, poem_id),
+                "gambar_file=%s, visibilitas=%s, status='pending', versi=versi+1, "
+                "updated_at=NOW() WHERE id=%s",
+                (judul, isi, bait, kategori, keyword, gambar_file, visibilitas, poem_id),
             )
     finally:
         conn.close()
 
+    # Hapus cache SEBELUM publish: begitu puisi dijadikan privat, gateway
+    # (pemeriksaan akses wordcloud/kbbi) tidak boleh lagi membaca versi publik dari cache.
+    _invalidate(user_id, poem_id)
     messaging.publish(
         events.POEM_UPDATED,
         events.poem_created_payload(
-            poem_id=poem_id, user_id=user_id, judul=judul, isi=isi, kategori=kategori
+            poem_id=poem_id,
+            user_id=user_id,
+            judul=judul,
+            isi=isi,
+            kategori=kategori,
+            visibilitas=visibilitas,
         ),
         request.headers.get("X-Request-ID"),
     )
-    _invalidate(user_id, poem_id)
-    return {"ok": True, "id_puisi": poem_id, "status": "pending"}
+    return {"ok": True, "id_puisi": poem_id, "status": "pending", "visibilitas": visibilitas}
 
 
 @app.delete("/api/poems/{poem_id}")

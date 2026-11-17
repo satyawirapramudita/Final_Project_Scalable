@@ -26,7 +26,8 @@ DDL = [
         gambar_file VARCHAR(255) NULL,
         status      VARCHAR(20)  NOT NULL DEFAULT 'pending',
         versi       INT          NOT NULL DEFAULT 1,
-        updated_at  DATETIME     NULL
+        updated_at  DATETIME     NULL,
+        visibilitas VARCHAR(10)  NOT NULL DEFAULT 'public'
     ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
     """,
     """
@@ -37,6 +38,27 @@ DDL = [
     ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
     """,
 ]
+
+
+# Kolom yang ditambahkan setelah tabel pertama kali dibuat. CREATE TABLE IF NOT
+# EXISTS tidak mengubah tabel lama (volume MySQL yang sudah ada), dan MySQL 8
+# tidak punya ADD COLUMN IF NOT EXISTS, jadi dicek lewat information_schema.
+# Puisi lama otomatis 'public' (perilaku sebelum fitur visibilitas).
+MIGRATIONS = [
+    ("puisi", "visibilitas", "VARCHAR(10) NOT NULL DEFAULT 'public'"),
+]
+
+
+def _migrate(cur) -> None:
+    for table, column, definition in MIGRATIONS:
+        cur.execute(
+            "SELECT COUNT(*) AS n FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+            (table, column),
+        )
+        if cur.fetchone()["n"] == 0:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            log.info("Migrasi: kolom %s.%s ditambahkan", table, column)
 
 
 def connect() -> pymysql.connections.Connection:
@@ -61,6 +83,7 @@ def init_schema(retries: int = 30, delay: int = 2) -> None:
                 with conn.cursor() as cur:
                     for stmt in DDL:
                         cur.execute(stmt)
+                    _migrate(cur)
             finally:
                 conn.close()
             log.info("Skema poem_db siap")

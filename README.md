@@ -80,6 +80,9 @@ Menghentikan: `docker compose down` (data bertahan di volume; tambah `-v` untuk 
 4. `docker compose up -d --build --remove-orphans`
 5. Puisi lama belum punya word cloud / KBBI: `Get-Content scripts/reanalyze_poems.py | docker compose exec -T poem python -`
 
+Kolom `visibilitas` (puisi publik/privat) ditambahkan otomatis oleh layanan poem dan search saat
+start (`ALTER TABLE` bila belum ada); puisi lama menjadi publik. Cukup langkah 4 (`--build`).
+
 ### Data KBBI
 
 Dataset KBBI tidak ada di repo (lisensi). Tanpa import, semua Kata Puitif tampil "tidak ditemukan".
@@ -93,11 +96,16 @@ Semua endpoint selain register/login butuh header `Authorization: Bearer <jwt>`.
 | Endpoint | Layanan |
 |---|---|
 | `POST /api/auth/register`, `/login`, `/logout`, `GET /me` | auth |
-| `GET/POST /api/poems` (puisi saya), `GET /api/poems/{id}` (semua user), `PUT/DELETE /api/poems/{id}` (pemilik) | poem |
-| `GET /api/wordcloud/{poem_id}` | wordcloud |
-| `GET /api/search?q=&kategori=&tag=&page=` | search |
-| `GET /api/kbbi/{poem_id}` | kbbi-linker |
+| `GET/POST /api/poems` (puisi saya), `GET /api/poems/{id}` (publik, atau privat milik sendiri), `PUT/DELETE /api/poems/{id}` (pemilik) | poem |
+| `GET /api/wordcloud/{poem_id}` (akses diperiksa gateway) | wordcloud |
+| `GET /api/search?q=&kategori=&tag=&page=` (puisi publik + privat milik sendiri) | search |
+| `GET /api/kbbi/{poem_id}` (akses diperiksa gateway) | kbbi-linker |
 | `GET /api/tts/{poem_id}` | tts (ditunda) |
+
+**Visibilitas.** `POST`/`PUT /api/poems` menerima `"visibilitas": "public" | "private"` (default
+`public`). Puisi privat hanya terlihat oleh pemiliknya; pengguna lain mendapat 404 di poem, search,
+wordcloud, dan kbbi. Uji kebocoran end-to-end:
+`Get-Content scripts/check_visibility.py | docker compose exec -T poem python -`
 
 ## Kontrak event
 

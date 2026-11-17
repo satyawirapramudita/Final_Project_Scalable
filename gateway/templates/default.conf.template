@@ -13,6 +13,14 @@
 limit_req_zone $binary_remote_addr zone=api_limit:10m rate=${API_RATE_LIMIT};
 limit_req_status 429;
 
+# Visibilitas puisi: id puisi dari /api/wordcloud/{id} dan /api/kbbi/{id}, dipakai
+# pemeriksaan akses (auth_request) ke layanan poem. Path lain -> 0 (tidak ada
+# puisi 0, jadi aksesnya ditolak dan klien mendapat 404).
+map $request_uri $acl_poem_id {
+    default 0;
+    "~^/api/(?:wordcloud|kbbi)/(?<acl_pid>[0-9]+)(?:[/?]|$)" $acl_pid;
+}
+
 server {
     listen 80;
     server_name _;
@@ -78,6 +86,37 @@ server {
         return 504 '{"ok":false,"detail":"Layanan tidak merespons tepat waktu"}';
     }
 
+    # Hasil pemeriksaan akses puisi (auth_request) untuk wordcloud dan kbbi.
+    location @err_401 {
+        default_type application/json;
+        return 401 '{"ok":false,"detail":"Token tidak ada, tidak valid, atau kedaluwarsa"}';
+    }
+    location @err_poem_404 {
+        # Puisi privat milik orang lain diperlakukan sama dengan puisi yang
+        # tidak ada, agar keberadaannya tidak terungkap.
+        default_type application/json;
+        return 404 '{"ok":false,"detail":"Puisi tidak ditemukan"}';
+    }
+    location @err_access {
+        # Layanan poem (pemeriksa akses) mati atau error: tolak, jangan loloskan.
+        default_type application/json;
+        return 503 '{"ok":false,"detail":"Pemeriksaan akses puisi tidak tersedia"}';
+    }
+
+    # Subrequest pemeriksaan akses. `internal`: tidak bisa dipanggil dari luar.
+    # Header Authorization klien ikut diteruskan apa adanya.
+    location = /_poem_access {
+        internal;
+        proxy_pass $poem_svc/internal/poems/$acl_poem_id/access;
+        proxy_pass_request_body off;
+        # Mendefinisikan proxy_set_header di sini mematikan pewarisan dari
+        # server, jadi header penting ditulis ulang.
+        proxy_set_header Content-Length "";
+        proxy_set_header Connection     "";
+        proxy_set_header X-Request-ID   $request_id;
+        proxy_set_header X-Original-URI $request_uri;
+    }
+
     # ── Kesehatan gateway ──
     location = /health {
         access_log off;
@@ -109,8 +148,21 @@ server {
         proxy_pass $poem_svc;
     }
 
+    # wordcloud dan kbbi menyajikan data turunan isi puisi. Sebelum diteruskan,
+    # gateway menanyakan ke layanan poem apakah pengguna boleh membaca puisi itu
+    # (puisi privat hanya untuk pemiliknya). Layanan wordcloud/kbbi tidak berubah.
+    # error_page di dalam location menggantikan seluruh error_page level server,
+    # jadi yang umum ditulis ulang.
     location ^~ /api/wordcloud/ {
         limit_req zone=api_limit burst=${API_BURST} nodelay;
+        auth_request /_poem_access;
+        error_page 401 = @err_401;
+        error_page 403 = @err_poem_404;
+        error_page 500 = @err_access;
+        error_page 429 @err_429;
+        error_page 502 @err_502;
+        error_page 503 @err_503;
+        error_page 504 @err_504;
         proxy_pass $wordcloud_svc;
     }
 
@@ -121,6 +173,14 @@ server {
 
     location ^~ /api/kbbi/ {
         limit_req zone=api_limit burst=${API_BURST} nodelay;
+        auth_request /_poem_access;
+        error_page 401 = @err_401;
+        error_page 403 = @err_poem_404;
+        error_page 500 = @err_access;
+        error_page 429 @err_429;
+        error_page 502 @err_502;
+        error_page 503 @err_503;
+        error_page 504 @err_504;
         proxy_pass $kbbi_svc;
     }
 
