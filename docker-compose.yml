@@ -23,6 +23,9 @@ services:
     image: nginx:1.27-alpine
     container_name: puisi-gateway
     restart: unless-stopped
+    labels:
+      # dipantau layanan autoheal: restart otomatis bila health check gagal
+      autoheal: "true"
     ports:
       - "${GATEWAY_PORT:-8080}:80"
     environment:
@@ -54,6 +57,9 @@ services:
       dockerfile: services/auth/Dockerfile
     container_name: puisi-auth
     restart: unless-stopped
+    labels:
+      # dipantau layanan autoheal: restart otomatis bila health check gagal
+      autoheal: "true"
     env_file: .env
     environment:
       <<: *common-env
@@ -82,6 +88,9 @@ services:
       dockerfile: services/poem/Dockerfile
     # Tanpa container_name agar bisa di-scale: docker compose up -d --scale poem=2
     restart: unless-stopped
+    labels:
+      # dipantau layanan autoheal: restart otomatis bila health check gagal
+      autoheal: "true"
     env_file: .env
     environment:
       <<: *common-env
@@ -113,6 +122,9 @@ services:
       dockerfile: services/wordcloud/Dockerfile
     # Tanpa container_name agar bisa di-scale: docker compose up -d --scale wordcloud=3
     restart: unless-stopped
+    labels:
+      # dipantau layanan autoheal: restart otomatis bila health check gagal
+      autoheal: "true"
     env_file: .env
     environment:
       <<: *common-env
@@ -145,6 +157,9 @@ services:
       dockerfile: services/search/Dockerfile
     # Tanpa container_name agar bisa di-scale: docker compose up -d --scale search=3
     restart: unless-stopped
+    labels:
+      # dipantau layanan autoheal: restart otomatis bila health check gagal
+      autoheal: "true"
     env_file: .env
     environment:
       <<: *common-env
@@ -176,6 +191,9 @@ services:
       context: .
       dockerfile: services/kbbi-linker/Dockerfile
     restart: unless-stopped
+    labels:
+      # dipantau layanan autoheal: restart otomatis bila health check gagal
+      autoheal: "true"
     env_file: .env
     environment:
       <<: *common-env
@@ -225,6 +243,9 @@ services:
       dockerfile: services/nlp-worker/Dockerfile
     # Tanpa container_name agar bisa di-scale: docker compose up -d --scale nlp-worker=3
     restart: unless-stopped
+    labels:
+      # dipantau layanan autoheal: restart otomatis bila health check gagal
+      autoheal: "true"
     env_file: .env
     environment:
       <<: *common-env
@@ -354,6 +375,25 @@ services:
         condition: service_healthy
     networks:
       - edge
+
+  # Self-healing: Docker Compose hanya me-restart container yang CRASH, bukan yang
+  # health check-nya gagal ("unhealthy", mis. proses hidup tapi macet). autoheal
+  # memantau container berlabel autoheal=true dan me-restart yang unhealthy.
+  # Sengaja hanya layanan stateless; mysql/redis/rabbitmq/prometheus tidak dilabeli
+  # karena me-restart penyimpan data saat beban tinggi bisa memperparah gangguan.
+  # Catatan keamanan: akses docker.sock setara akses root ke Docker host.
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    container_name: puisi-autoheal
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: 10       # detik antar pemeriksaan
+      AUTOHEAL_START_PERIOD: 60   # tunggu stack selesai start sebelum mulai memantau
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: 10
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    network_mode: none
 
 networks:
   edge:

@@ -67,6 +67,11 @@ docker compose up --build -d
 
 Menghentikan: `docker compose down` (data bertahan di volume; tambah `-v` untuk hapus).
 
+**Self-healing.** Container `puisi-autoheal` me-restart layanan stateless (gateway, auth, poem,
+wordcloud, search, kbbi-linker, nlp-worker) yang health check-nya gagal, kasus yang tidak ditangani
+`restart: unless-stopped` (yang hanya bereaksi pada crash). Uji: `docker kill --signal=SIGSTOP <container>`
+membuat layanan macet; sekitar 1 menit kemudian autoheal me-restart-nya (`docker logs puisi-autoheal`).
+
 ### Memperbarui dari versi lama (volume sudah ada)
 
 `db/init.sql` hanya berjalan saat volume MySQL pertama kali dibuat. Setelah `git pull`:
