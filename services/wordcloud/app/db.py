@@ -21,6 +21,8 @@ from typing import Any
 import pymysql
 import pymysql.cursors
 
+from shared import backoff
+
 from . import config
 
 log = logging.getLogger("wordcloud.db")
@@ -112,7 +114,7 @@ def init_schema(retries: int = 30, delay: int = 2) -> None:
         except Exception as exc:  # noqa: BLE001
             last = exc
             log.warning("menunggu wordcloud_db (%s/%s): %s", attempt, retries, exc)
-            time.sleep(delay)
+            time.sleep(backoff.equal_jitter(delay))
     raise RuntimeError(f"tidak dapat menyiapkan wordcloud_db: {last}")
 
 

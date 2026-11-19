@@ -12,10 +12,11 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 from pydantic import BaseModel
 
-from shared import events
+from shared import events, idempotency
 from shared.metrics import REQUEST_SECONDS, route_path
 
 from . import cache, config, db, messaging
@@ -148,6 +149,46 @@ def _can_read(item: dict, user_id: int) -> bool:
     return int(item["user_id"]) == user_id
 
 
+# ── Idempotency ───────────────────────────────────────────────
+# Klien mengirim header Idempotency-Key pada POST/PUT/DELETE. Retry dengan
+# key + payload yang sama mendapat respons pertama kembali (bukan duplikat);
+# key dengan payload berbeda ditolak 409. Tanpa header, perilaku tidak berubah.
+
+
+def _idem_begin(request: Request, user_id: int, payload: dict | None):
+    """Klaim key. Kembalikan (key, fp) untuk _idem_finish, atau Response bila
+    replay, atau raise 409 bila konflik. None = tanpa header, jalur biasa."""
+    key = request.headers.get("Idempotency-Key")
+    if not key:
+        return None
+    fp = idempotency.fingerprint(payload)
+    outcome, stored = cache.idempotency().claim(user_id, key, fp)
+    if outcome == idempotency.OUTCOME_REPLAY:
+        return JSONResponse(
+            status_code=int(stored["status"]),
+            content=stored["body"],
+            headers={"Idempotent-Replay": "true"},
+        )
+    if outcome == idempotency.OUTCOME_CONFLICT:
+        raise HTTPException(
+            status_code=409,
+            detail="Idempotency-Key sudah dipakai untuk request yang berbeda",
+        )
+    return (key, fp)
+
+
+def _idem_finish(token, user_id: int, status: int, body: dict) -> None:
+    """Simpan respons sukses; dipanggil setelah operasi DB benar-benar commit."""
+    if token is not None:
+        cache.idempotency().save(user_id, token[0], token[1], status, body)
+
+
+def _idem_release(token, user_id: int) -> None:
+    """Lepaskan klaim saat request gagal agar retry klien tidak menabrak konflik."""
+    if token is not None:
+        cache.idempotency().release(user_id, token[0])
+
+
 def _load_item(poem_id: int) -> tuple[dict, bool]:
     """Detail puisi lewat cache-aside. Kembalikan (item, dari_cache).
 
@@ -257,19 +298,32 @@ def create_poem(body: PoemCreate, request: Request, user: dict = Depends(current
     visibilitas = body.visibilitas
     _validate_fields(judul, isi, kategori, gambar_file)
 
-    conn = db.connect()
+    token = _idem_begin(request, user_id, body.model_dump())
+    if isinstance(token, Response):
+        return token
+
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO puisi "
-                "(user_id, judul, tgl_submit, isi, bait, kategori, keyword, gambar_file, "
-                "status, versi, visibilitas) "
-                "VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s, 'pending', 1, %s)",
-                (user_id, judul, isi, bait, kategori, keyword, gambar_file, visibilitas),
-            )
-            poem_id = cur.lastrowid
-    finally:
-        conn.close()
+        conn = db.connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO puisi "
+                    "(user_id, judul, tgl_submit, isi, bait, kategori, keyword, gambar_file, "
+                    "status, versi, visibilitas) "
+                    "VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s, 'pending', 1, %s)",
+                    (user_id, judul, isi, bait, kategori, keyword, gambar_file, visibilitas),
+                )
+                poem_id = cur.lastrowid
+        finally:
+            conn.close()
+    except Exception:
+        _idem_release(token, user_id)
+        raise
+
+    result = {"ok": True, "id_puisi": poem_id, "status": "pending", "visibilitas": visibilitas}
+    # Respons disimpan sebelum publish/invalidasi: INSERT sudah commit (autocommit),
+    # jadi retry harus mendapat replay, bukan duplikat.
+    _idem_finish(token, user_id, 201, result)
 
     messaging.publish(
         events.POEM_CREATED,
@@ -284,7 +338,7 @@ def create_poem(body: PoemCreate, request: Request, user: dict = Depends(current
         request.headers.get("X-Request-ID"),
     )
     _invalidate(user_id, poem_id)
-    return {"ok": True, "id_puisi": poem_id, "status": "pending", "visibilitas": visibilitas}
+    return result
 
 
 @app.get("/api/poems")
@@ -347,31 +401,44 @@ def update_poem(
     poem_id: int, body: PoemUpdate, request: Request, user: dict = Depends(current_user)
 ) -> dict:
     user_id = int(user["sub"])
-    row = _get_row(poem_id)
-    if row["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Bukan pemilik puisi")
+    # Klaim sebelum pemeriksaan row: retry replay harus mencapai cek key
+    # walau puisi sudah berubah/hapus; kegagalan (404/403/400) melepas key.
+    token = _idem_begin(request, user_id, body.model_dump())
+    if isinstance(token, Response):
+        return token
 
-    fields = body.model_dump(exclude_unset=True)
-    judul = (fields.get("judul") or row["judul"]).strip()
-    isi = (fields.get("isi") or row["isi"]).strip()
-    kategori = (fields.get("kategori") or row["kategori"]).strip()
-    keyword = _clean(fields.get("keyword", row["keyword"]), 255)
-    bait = _clean(fields.get("bait", row["bait"]), 500)
-    gambar_file = _clean(fields.get("gambar_file", row["gambar_file"]), 255)
-    visibilitas = fields.get("visibilitas") or events.parse_visibility(row.get("visibilitas"))
-    _validate_fields(judul, isi, kategori, gambar_file)
-
-    conn = db.connect()
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE puisi SET judul=%s, isi=%s, bait=%s, kategori=%s, keyword=%s, "
-                "gambar_file=%s, visibilitas=%s, status='pending', versi=versi+1, "
-                "updated_at=NOW() WHERE id=%s",
-                (judul, isi, bait, kategori, keyword, gambar_file, visibilitas, poem_id),
-            )
-    finally:
-        conn.close()
+        row = _get_row(poem_id)
+        if row["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Bukan pemilik puisi")
+
+        fields = body.model_dump(exclude_unset=True)
+        judul = (fields.get("judul") or row["judul"]).strip()
+        isi = (fields.get("isi") or row["isi"]).strip()
+        kategori = (fields.get("kategori") or row["kategori"]).strip()
+        keyword = _clean(fields.get("keyword", row["keyword"]), 255)
+        bait = _clean(fields.get("bait", row["bait"]), 500)
+        gambar_file = _clean(fields.get("gambar_file", row["gambar_file"]), 255)
+        visibilitas = fields.get("visibilitas") or events.parse_visibility(row.get("visibilitas"))
+        _validate_fields(judul, isi, kategori, gambar_file)
+
+        conn = db.connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE puisi SET judul=%s, isi=%s, bait=%s, kategori=%s, keyword=%s, "
+                    "gambar_file=%s, visibilitas=%s, status='pending', versi=versi+1, "
+                    "updated_at=NOW() WHERE id=%s",
+                    (judul, isi, bait, kategori, keyword, gambar_file, visibilitas, poem_id),
+                )
+        finally:
+            conn.close()
+    except Exception:
+        _idem_release(token, user_id)
+        raise
+
+    result = {"ok": True, "id_puisi": poem_id, "status": "pending", "visibilitas": visibilitas}
+    _idem_finish(token, user_id, 200, result)
 
     # Hapus cache SEBELUM publish: begitu puisi dijadikan privat, gateway
     # (pemeriksaan akses wordcloud/kbbi) tidak boleh lagi membaca versi publik dari cache.
@@ -394,17 +461,30 @@ def update_poem(
 @app.delete("/api/poems/{poem_id}")
 def delete_poem(poem_id: int, request: Request, user: dict = Depends(current_user)) -> dict:
     user_id = int(user["sub"])
-    row = _get_row(poem_id)
-    if row["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Bukan pemilik puisi")
+    # Klaim sebelum _get_row: retry setelah puisi terhapus harus tetap
+    # mendapat replay 200, bukan 404. Pemeriksaan gagal melepas key.
+    token = _idem_begin(request, user_id, None)
+    if isinstance(token, Response):
+        return token
 
-    conn = db.connect()
     try:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM puisi_tag WHERE puisi_id = %s", (poem_id,))
-            cur.execute("DELETE FROM puisi WHERE id = %s", (poem_id,))
-    finally:
-        conn.close()
+        row = _get_row(poem_id)
+        if row["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Bukan pemilik puisi")
+
+        conn = db.connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM puisi_tag WHERE puisi_id = %s", (poem_id,))
+                cur.execute("DELETE FROM puisi WHERE id = %s", (poem_id,))
+        finally:
+            conn.close()
+    except Exception:
+        _idem_release(token, user_id)
+        raise
+
+    result = {"ok": True, "message": "Puisi dihapus"}
+    _idem_finish(token, user_id, 200, result)
 
     messaging.publish(
         events.POEM_DELETED,
@@ -412,4 +492,4 @@ def delete_poem(poem_id: int, request: Request, user: dict = Depends(current_use
         request.headers.get("X-Request-ID"),
     )
     _invalidate(user_id, poem_id)
-    return {"ok": True, "message": "Puisi dihapus"}
+    return result

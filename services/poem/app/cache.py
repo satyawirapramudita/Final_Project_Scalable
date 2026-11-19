@@ -18,6 +18,7 @@ try:
 except Exception:  # noqa: BLE001
     redis = None  # type: ignore[assignment]
 
+from shared.idempotency import IdempotencyStore
 from shared.redis_breaker import RedisBreaker
 
 from . import config
@@ -83,3 +84,18 @@ def delete_pattern(pattern: str) -> None:
             c.delete(key)
 
     _run(_scan_delete, None)
+
+
+# ── Idempotency ───────────────────────────────────────────────
+
+_idem: IdempotencyStore | None = None
+
+
+def idempotency() -> IdempotencyStore:
+    """Store idempotency yang memakai client & breaker Redis yang sama dengan cache."""
+    global _idem
+    if _idem is None:
+        _idem = IdempotencyStore(
+            _run, service=config.SERVICE_NAME, ttl=config.IDEMPOTENCY_TTL
+        )
+    return _idem

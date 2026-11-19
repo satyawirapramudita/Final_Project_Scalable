@@ -11,6 +11,8 @@ from typing import Any
 import pymysql
 from pymysql.cursors import DictCursor
 
+from shared import backoff
+
 from . import config
 
 log = logging.getLogger("kbbi.db")
@@ -130,7 +132,7 @@ def init_schema(retries: int = 30, delay: int = 2) -> None:
         except Exception as exc:
             last = exc
             log.warning("Menunggu kbbi_db (%s/%s): %s", attempt, retries, exc)
-            time.sleep(delay)
+            time.sleep(backoff.equal_jitter(delay))
     raise RuntimeError(f"Tidak dapat menyiapkan kbbi_db: {last}")
 
 

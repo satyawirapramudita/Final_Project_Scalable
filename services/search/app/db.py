@@ -12,6 +12,8 @@ import pymysql
 from prometheus_client import Counter
 from pymysql.cursors import DictCursor
 
+from shared import backoff
+
 from . import config
 
 log = logging.getLogger("search.db")
@@ -187,5 +189,5 @@ def init_schema(retries: int = 30, delay: int = 2) -> None:
         except Exception as exc:  # noqa: BLE001
             last = exc
             log.warning("Menunggu database (%s/%s): %s", attempt, retries, exc)
-            time.sleep(delay)
+            time.sleep(backoff.equal_jitter(delay))
     raise RuntimeError(f"Tidak dapat menyiapkan skema search_db: {last}")

@@ -34,9 +34,12 @@ services:
       API_RATE_LIMIT: ${API_RATE_LIMIT:-20r/s}
       API_BURST: ${API_BURST:-40}
     volumes:
-      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./gateway/templates:/etc/nginx/templates:ro
-      - ./frontend:/usr/share/nginx/html:ro
+      # `z` menandai file/direktori host dengan label SELinux container_file_t —
+      # tanpa ini, di host SELinux enforcing (Fedora/RHEL) proses container
+      # mendapat "permission denied" saat membaca bind-mount meski mode 644.
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro,z
+      - ./gateway/templates:/etc/nginx/templates:ro,z
+      - ./frontend:/usr/share/nginx/html:ro,z
     depends_on:
       auth:
         condition: service_started
@@ -70,6 +73,8 @@ services:
       DB_NAME: ${AUTH_DB_NAME:-auth_db}
       DB_USER: ${AUTH_DB_USER:-auth_user}
       DB_PASSWORD: ${AUTH_DB_PASSWORD}
+      DB_POOL_MIN: ${DB_POOL_MIN:-2}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
     depends_on:
       mysql:
         condition: service_healthy
@@ -102,6 +107,9 @@ services:
       DB_USER: ${POEM_DB_USER:-poem_user}
       DB_PASSWORD: ${POEM_DB_PASSWORD}
       ASSET_BASE_URL: ${ASSET_BASE_URL}
+      DB_POOL_MIN: ${DB_POOL_MIN:-2}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      IDEMPOTENCY_TTL: ${IDEMPOTENCY_TTL:-86400}
     depends_on:
       mysql:
         condition: service_healthy
@@ -272,7 +280,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro,z
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 5s
@@ -308,7 +316,7 @@ services:
       - "15672:15672" # management UI (dev)
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
-      - ./observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ./observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro,z
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -331,7 +339,7 @@ services:
     ports:
       - "127.0.0.1:9090:9090"
     volumes:
-      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
       - prometheus_data:/prometheus
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/healthy"]
@@ -365,10 +373,10 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/puisi-overview.json
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
     volumes:
-      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro,z
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro,z
       - grafana_data:/var/lib/grafana
     depends_on:
       prometheus:
@@ -383,7 +391,11 @@ services:
   # karena me-restart penyimpan data saat beban tinggi bisa memperparah gangguan.
   # Catatan keamanan: akses docker.sock setara akses root ke Docker host.
   autoheal:
-    image: willfarrell/autoheal:1.2.0
+    # Tag 1.2.0 di Docker Hub adalah build 2021 yang cacat (binary `autoheal`
+    # tidak ada → entrypoint gagal "autoheal: not found", exit 127). Tag resmi
+    # yang didukung upstream hanya latest/1.1.0/v0.7.0. Dipin per-digest
+    # (amd64, build upstream Dockerfile saat ini) demi supply chain.
+    image: willfarrell/autoheal@sha256:47cac8b9c7cdf05114065d453fecc4e1c0eeab1dc06a635ea2764b6302e206ad
     container_name: puisi-autoheal
     restart: unless-stopped
     environment:
@@ -391,6 +403,12 @@ services:
       AUTOHEAL_INTERVAL: 10       # detik antar pemeriksaan
       AUTOHEAL_START_PERIOD: 60   # tunggu stack selesai start sebelum mulai memantau
       AUTOHEAL_DEFAULT_STOP_TIMEOUT: 10
+    # label:disable: tanpa ini, di host SELinux enforcing container berlabel
+    # container_t tidak boleh membuka /var/run/docker.sock ("unix socket is
+    # currently not available"). Pola standar untuk container yang butuh
+    # akses API Docker (autoheal, watchtower, portainer).
+    security_opt:
+      - label:disable
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     network_mode: none

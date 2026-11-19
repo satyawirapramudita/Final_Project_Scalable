@@ -112,6 +112,20 @@ Semua endpoint selain register/login butuh header `Authorization: Bearer <jwt>`.
 wordcloud, dan kbbi. Uji kebocoran end-to-end:
 `Get-Content scripts/check_visibility.py | docker compose exec -T poem python -`
 
+**Idempotency key.** `POST /api/poems`, `PUT/DELETE /api/poems/{id}` menerima header
+`Idempotency-Key: <string-unik>`. Klien yang mengirim ulang request dengan key + payload yang sama
+menerima respons pertama kembali (header `Idempotent-Replay: true`) tanpa data ganda; key dengan
+payload berbeda ditolak `409 Conflict`. Key diingat 24 jam (`IDEMPOTENCY_TTL`, detik) dan di-scope
+per user — tidak bisa dipakai lintas akun. Tanpa header, perilaku tidak berubah. Frontend sudah
+mengirim key otomatis pada submit dan mengulang otomatis (maks 3 attempt, backoff eksponensial
+berjitter) untuk GET dan submit saat jaringan/5xx.
+
+**Connection pool.** poem dan auth memakai pool MySQL (DBUtils): koneksi dibuat ulang otomatis bila
+MySQL restart (`ping=1`). Ukuran via env `DB_POOL_MIN` (default 2) dan `DB_POOL_MAX` (default 10);
+naikkan `DB_POOL_MAX` saat stress test bila MySQL punya `max_connections` lebih besar. Pemakaian pool
+pantau lewat metrik `db_pool_connections{service,state=idle|in_use}`; hasil dedup idempotency lewat
+`idempotency_total{service,result=new|replay|conflict}`.
+
 ## Kontrak event
 
 Lihat [`docs/event-contracts.md`](docs/event-contracts.md) dan [`shared/events.py`](shared/events.py).

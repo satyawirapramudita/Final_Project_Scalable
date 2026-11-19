@@ -16,13 +16,21 @@ dan memenuhi memori Prometheus.
 
 from __future__ import annotations
 
-from prometheus_client import Histogram
+from prometheus_client import Gauge, Histogram
 
 REQUEST_SECONDS = Histogram(
     "http_request_duration_seconds",
     "Latensi request HTTP",
     ["service", "method", "path"],
     buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5),
+)
+
+# Gauge pool MySQL — satu definisi di sini agar layanan dalam satu proses uji
+# tidak saling menabrak registrasi. Nilai diisi tiap service via set_function.
+DB_POOL_CONNECTIONS = Gauge(
+    "db_pool_connections",
+    "Koneksi pool MySQL per state (idle/in_use)",
+    ["service", "state"],
 )
 
 

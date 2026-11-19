@@ -14,7 +14,7 @@ from typing import Callable
 
 import pika
 
-from shared import events
+from shared import backoff, events
 
 log = logging.getLogger("shared.rabbit")
 
@@ -49,7 +49,7 @@ def connect(
         except Exception as exc:  # noqa: BLE001
             last = exc
             log.warning("RabbitMQ belum siap (%s/%s): %s", attempt, retries, exc)
-            time.sleep(delay)
+            time.sleep(backoff.equal_jitter(delay))
     raise RuntimeError(f"Tidak dapat terhubung ke RabbitMQ: {last}")
 
 
@@ -155,7 +155,7 @@ def start_consumer(
                         except Exception as exc:  # noqa: BLE001
                             log.warning("handler gagal (%s/%s): %s", attempt, max_retries, exc)
                             if attempt < max_retries:
-                                time.sleep(2**attempt)
+                                time.sleep(backoff.full_jitter(attempt, base=2, cap=8))
                     log.error("handler gagal total -> DLQ")
                     ch.basic_nack(method.delivery_tag, requeue=False)
 
@@ -164,7 +164,7 @@ def start_consumer(
                 channel.start_consuming()
             except Exception:  # noqa: BLE001
                 log.exception("Koneksi konsumen %s terputus, reconnect dalam 3 dtk...", queue)
-                time.sleep(3)
+                time.sleep(backoff.equal_jitter(3))
 
     thread = threading.Thread(target=run, name=f"consumer-{queue}", daemon=True)
     thread.start()
