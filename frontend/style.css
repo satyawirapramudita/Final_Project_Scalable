@@ -394,6 +394,32 @@ p.empty {
     background-color: #ffecb3;
 }
 
+/* Edit dan hapus puisi */
+.edit-btn {
+    background-color: #e3f2fd;
+}
+
+.edit-btn:hover {
+    background-color: #bbdefb;
+}
+
+.del-btn {
+    background-color: #fdecea;
+    color: #8b0000;
+}
+
+.del-btn:hover {
+    background-color: #f8c9c4;
+}
+
+.edit-notice {
+    margin: 0 0 8px 0;
+    padding: 4px 8px;
+    border: 1px dashed #1a237e;
+    background-color: #eef;
+    font-size: 13px;
+}
+
 .open-btn {
     background-color: #efe;
 }
