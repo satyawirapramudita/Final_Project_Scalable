@@ -161,7 +161,12 @@ def _idem_begin(request: Request, user_id: int, payload: dict | None):
     key = request.headers.get("Idempotency-Key")
     if not key:
         return None
-    fp = idempotency.fingerprint(payload)
+    # Method + path ikut sidik jari: key yang sama untuk operasi lain (mis.
+    # DELETE puisi B setelah DELETE puisi A) harus 409, bukan replay respons
+    # operasi pertama yang membuat klien mengira puisi B ikut terhapus.
+    fp = idempotency.fingerprint(
+        {"method": request.method, "path": request.url.path, "body": payload}
+    )
     outcome, stored = cache.idempotency().claim(user_id, key, fp)
     if outcome == idempotency.OUTCOME_REPLAY:
         return JSONResponse(

@@ -45,6 +45,10 @@ def _get_pool() -> PooledDB:
                     creator=pymysql,
                     mincached=config.DB_POOL_MIN,
                     maxconnections=config.DB_POOL_MAX,
+                    # blocking=True: request ke-(max+1) MENUNGGU koneksi bebas.
+                    # Default DBUtils (False) langsung melempar
+                    # TooManyConnectionsError -> HTTP 500 saat beban tinggi.
+                    blocking=True,
                     # ping=1: koneksi di-ping saat diambil; koneksi mati
                     # (mis. MySQL restart) otomatis dibuat ulang.
                     ping=1,
@@ -56,6 +60,11 @@ def _get_pool() -> PooledDB:
                     cursorclass=DictCursor,
                     autocommit=True,
                     charset="utf8mb4",
+                    # Batas waktu agar koneksi yang macet tidak menahan slot pool
+                    # selamanya (blocking=True menunggu tanpa batas).
+                    connect_timeout=3,
+                    read_timeout=10,
+                    write_timeout=10,
                 )
     return _POOL
 

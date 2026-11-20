@@ -98,9 +98,31 @@ class TestPool:
         assert len(pool_env._POOL._idle_cache) == 1
 
     def test_melebihi_maksimal_menunggu_bukan_error(self, pool_env):
+        # Ambil semua slot, lalu minta SATU lagi dari thread lain: permintaan itu
+        # harus menunggu (bukan TooManyConnectionsError) dan berhasil begitu ada
+        # koneksi yang dikembalikan.
+        import threading
+
         maxconn = pool_env.config.DB_POOL_MAX
         conns = [pool_env.connect() for _ in range(maxconn)]
-        assert len(conns) == maxconn
+        hasil: dict = {}
+
+        def minta_lagi() -> None:
+            try:
+                hasil["conn"] = pool_env.connect()
+            except Exception as exc:  # noqa: BLE001
+                hasil["error"] = exc
+
+        t = threading.Thread(target=minta_lagi, daemon=True)
+        t.start()
+        t.join(timeout=0.3)
+        assert t.is_alive(), f"seharusnya menunggu, bukan selesai: {hasil}"
+
+        conns.pop().close()  # kembalikan satu koneksi ke pool
+        t.join(timeout=2)
+        assert not t.is_alive()
+        assert "error" not in hasil, hasil["error"] if "error" in hasil else ""
+        assert hasil.get("conn") is not None
 
 
 class TestMetrikPool:

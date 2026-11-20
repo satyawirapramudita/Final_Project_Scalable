@@ -79,6 +79,17 @@ class TestDelete:
         assert ulang.json() == pertama.json()
         assert ulang.headers.get("Idempotent-Replay") == "true"
 
+    def test_key_sama_untuk_puisi_lain_409_bukan_replay(self, client, auth_header, submitted_poem):
+        # Key dipakai ulang untuk DELETE puisi LAIN: tidak boleh replay
+        # "Puisi dihapus" (puisi kedua sebenarnya tidak terhapus).
+        kedua = client.post("/api/poems", json=BODY, headers=auth_header).json()["id_puisi"]
+        headers = {**auth_header, "Idempotency-Key": "d-bersama"}
+        assert client.delete(f"/api/poems/{submitted_poem}", headers=headers).status_code == 200
+        resp = client.delete(f"/api/poems/{kedua}", headers=headers)
+        assert resp.status_code == 409
+        assert resp.headers.get("Idempotent-Replay") is None
+        assert client.get(f"/api/poems/{kedua}", headers=auth_header).status_code == 200
+
     def test_delete_tanpa_key_setelah_hapus_404(self, client, auth_header, submitted_poem):
         client.delete(f"/api/poems/{submitted_poem}", headers=auth_header)
         resp = client.delete(f"/api/poems/{submitted_poem}", headers=auth_header)
