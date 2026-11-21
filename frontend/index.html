@@ -58,7 +58,8 @@
     <div id="app-panel" class="hidden">
         <form id="form-puisi" action="#">
             <fieldset>
-                <legend><b>Unggah Puisi</b></legend>
+                <legend><b id="form-puisi-title">Unggah Puisi</b></legend>
+                <p id="edit-notice" class="edit-notice hidden"></p>
                 Judul: <br>
                 <input type="text" id="puisi-judul" name="judul" required maxlength="150" size="50"><br><br>
                 Kategori: <br>
@@ -104,6 +105,7 @@
                     <p id="preview-status" style="font-style:italic; color:#555;"></p>
                 </div><br>
                 <input type="submit" value="Kirim Puisi" id="btn-submit-puisi">
+                <input type="button" value="Batal" id="btn-cancel-edit" class="hidden">
             </fieldset>
         </form>
 

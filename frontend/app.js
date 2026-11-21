@@ -137,6 +137,8 @@ function showAuth() {
     $("search-results").replaceChildren();
     $("search-pager").classList.add("hidden");
     $("poem-view").classList.add("hidden");
+    // Keluar dari mode edit: pengguna berikutnya tidak boleh mewarisi form edit.
+    if (_editingPoem) cancelEdit();
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -319,6 +321,12 @@ async function submitPuisi(e) {
     submitBtn.value = "Memproses...";
 
     try {
+        // Mode edit: form yang sama, tetapi disimpan lewat PUT ke puisi yang diedit.
+        if (_editingPoem) {
+            await savePoemEdit();
+            return;
+        }
+
         const params = getGeneratorParams();
         const bait = $("puisi-bait").value.trim();
 
@@ -360,7 +368,143 @@ async function submitPuisi(e) {
         }
     } finally {
         submitBtn.disabled = false;
-        submitBtn.value = "Kirim Puisi";
+        submitBtn.value = _editingPoem ? "Simpan Perubahan" : "Kirim Puisi";
+    }
+}
+
+// ─── Edit & Hapus Puisi ───────────────────────────────────────────────────────
+// Edit memakai form unggah yang sama (mode edit). Backend: PUT/DELETE
+// /api/poems/{id}, hanya pemilik. Setelah edit, poem mem-publish poem.updated
+// sehingga nlp-worker menganalisis ulang (tag, word cloud, KBBI, indeks search).
+let _editingPoem = null; // puisi yang sedang diedit; null = mode unggah
+let _editInitialImage = null; // judul/bait/template saat form diisi (deteksi perlu gambar baru)
+
+function currentTemplateValue() {
+    const el = document.querySelector("input[name='template']:checked");
+    return el ? el.value : "";
+}
+
+function errorText(data, fallback) {
+    // FastAPI: detail berupa string (HTTPException) atau array (validasi 422).
+    if (data && typeof data.message === "string") return data.message;
+    if (data && typeof data.detail === "string") return data.detail;
+    return fallback;
+}
+
+function setFormMode(poem) {
+    _editingPoem = poem;
+    const editing = poem !== null;
+    $("form-puisi-title").textContent = editing ? "Edit Puisi" : "Unggah Puisi";
+    $("btn-submit-puisi").value = editing ? "Simpan Perubahan" : "Kirim Puisi";
+    $("btn-cancel-edit").classList.toggle("hidden", !editing);
+    const notice = $("edit-notice");
+    notice.classList.toggle("hidden", !editing);
+    notice.textContent = editing
+        ? `Mengedit "${poem.judul}". Setelah disimpan, tag, word cloud, dan KBBI dianalisis ulang.`
+        : "";
+}
+
+function resetPuisiForm() {
+    $("form-puisi").reset();
+    $("preview-gambar").style.display = "none";
+    $("preview-status").textContent = "";
+}
+
+function startEdit(p) {
+    resetPuisiForm();
+    $("puisi-judul").value = p.judul || "";
+    $("puisi-kategori").value = p.kategori || "";
+    $("puisi-keyword").value = p.keyword || "";
+    $("puisi-isi").value = p.isi || "";
+    $("puisi-bait").value = p.bait || "";
+    $(isPrivate(p.visibilitas) ? "vis-private" : "vis-public").checked = true;
+    _editInitialImage = {
+        judul: $("puisi-judul").value.trim(),
+        bait: $("puisi-bait").value.trim(),
+        template: currentTemplateValue(),
+    };
+    setFormMode(p);
+    showMessage($("puisi-message"), "");
+    $("form-puisi").scrollIntoView({ behavior: "smooth" });
+    $("puisi-judul").focus();
+}
+
+function cancelEdit() {
+    resetPuisiForm();
+    setFormMode(null);
+    showMessage($("puisi-message"), "");
+}
+
+async function savePoemEdit() {
+    const poem = _editingPoem;
+    const msg = $("puisi-message");
+    const params = getGeneratorParams();
+    const body = {
+        judul: params.judul,
+        kategori: $("puisi-kategori").value.trim(),
+        keyword: $("puisi-keyword").value.trim(),
+        isi: $("puisi-isi").value.trim(),
+        bait: params.bait,
+        visibilitas: $("vis-private").checked ? "private" : "public",
+    };
+
+    // Gambar dibuat ulang hanya bila isinya berubah (judul, bait, atau template).
+    // Tanpa gambar_file di body, backend mempertahankan gambar lama.
+    const awal = _editInitialImage || {};
+    const gambarBerubah =
+        params.judul !== awal.judul || params.bait !== awal.bait || params.template !== awal.template;
+    if (gambarBerubah) {
+        if (!params.bait) {
+            body.gambar_file = ""; // bait dihapus: gambar lama tidak cocok lagi
+        } else if (GENERATOR_BASE_URL && params.judul) {
+            showMessage(msg, "Membuat gambar baru...");
+            const key = await saveImage(params);
+            if (key) body.gambar_file = key; // gagal: gambar lama dipertahankan
+        }
+    }
+
+    showMessage(msg, "Menyimpan perubahan...");
+    const { status, data } = await api(`poems/${poem.id}`, "PUT", body);
+    if (status === 200 && data.ok) {
+        resetPuisiForm();
+        setFormMode(null);
+        showMessage(msg, "Perubahan disimpan. Tag, word cloud, dan KBBI sedang dianalisis ulang.", false);
+        loadPuisi();
+        if (_openPoemId === poem.id) openPoem(poem.id);
+    } else if (status === 401) {
+        setToken("");
+        showAuth();
+    } else if (status === 404) {
+        cancelEdit();
+        showMessage(msg, "Puisi sudah tidak ada (mungkin sudah dihapus).", true);
+        loadPuisi();
+    } else {
+        showMessage(msg, errorText(data, "Gagal menyimpan perubahan"), true);
+    }
+}
+
+async function deletePoem(p, button) {
+    if (!confirm(`Hapus puisi "${p.judul}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+    const msg = $("puisi-message");
+    button.disabled = true;
+    try {
+        const { status, data } = await api(`poems/${p.id}`, "DELETE");
+        if (status === 200 && data.ok) {
+            if (_editingPoem && _editingPoem.id === p.id) cancelEdit();
+            if (_openPoemId === p.id) closePoem();
+            showMessage(msg, `Puisi "${p.judul}" dihapus.`, false);
+            loadPuisi();
+        } else if (status === 401) {
+            setToken("");
+            showAuth();
+        } else if (status === 404) {
+            showMessage(msg, "Puisi sudah tidak ada.", true);
+            loadPuisi();
+        } else {
+            showMessage(msg, errorText(data, "Gagal menghapus puisi"), true);
+        }
+    } finally {
+        button.disabled = false;
     }
 }
 
@@ -491,6 +635,27 @@ async function loadPuisi() {
             });
             card.appendChild(visBtn);
 
+            // Edit (isi form unggah dalam mode edit) dan hapus
+            const editBtn = document.createElement("button");
+            editBtn.type = "button";
+            editBtn.className = "wc-btn edit-btn";
+            editBtn.textContent = "Edit";
+            editBtn.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                startEdit(p);
+            });
+            card.appendChild(editBtn);
+
+            const delBtn = document.createElement("button");
+            delBtn.type = "button";
+            delBtn.className = "wc-btn del-btn";
+            delBtn.textContent = "Hapus";
+            delBtn.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                deletePoem(p, delBtn);
+            });
+            card.appendChild(delBtn);
+
             card.style.cursor = "pointer";
             card.title = "Klik untuk lihat / sembunyikan isi";
             card.addEventListener("click", () => {
@@ -524,8 +689,12 @@ function visibilityBadge(visibilitas) {
 
 async function toggleVisibility(p, button) {
     const target = isPrivate(p.visibilitas) ? "public" : "private";
-    const label = target === "private" ? "privat (hanya Anda)" : "publik (semua pengguna)";
-    if (!confirm(`Jadikan puisi "${p.judul}" ${label}?`)) return;
+    const pesan = target === "private"
+        ? `Jadikan data puisi "${p.judul}" ini privat?\n\n` +
+          "Hanya Anda yang dapat mengakses data ini. Tautan publik dan sematan (embed) eksternal yang ada akan langsung berhenti berfungsi."
+        : `Jadikan data puisi "${p.judul}" ini publik?\n\n` +
+          "Siapa pun yang memiliki tautan atau akses ke daftar publik akan dapat melihat dan mengunduh data ini. Pastikan data tidak berisi informasi sensitif atau rahasia.";
+    if (!confirm(pesan)) return;
 
     button.disabled = true;
     try {
@@ -536,6 +705,10 @@ async function toggleVisibility(p, button) {
                 target === "private" ? "Puisi sekarang privat." : "Puisi sekarang publik.",
                 false
             );
+            // Puisi yang sama sedang diedit: samakan pilihan visibilitas di form.
+            if (_editingPoem && _editingPoem.id === p.id) {
+                $(target === "private" ? "vis-private" : "vis-public").checked = true;
+            }
             loadPuisi();
         } else if (status === 401) {
             setToken("");
@@ -867,6 +1040,7 @@ $("form-login").addEventListener("submit", login);
 $("form-register").addEventListener("submit", register);
 $("btn-logout").addEventListener("click", logout);
 $("form-puisi").addEventListener("submit", submitPuisi);
+$("btn-cancel-edit").addEventListener("click", cancelEdit);
 $("btn-refresh").addEventListener("click", refreshPuisi);
 $("form-search").addEventListener("submit", startSearch);
 $("btn-search-prev").addEventListener("click", () => changeSearchPage(-1));
