@@ -689,8 +689,12 @@ function visibilityBadge(visibilitas) {
 
 async function toggleVisibility(p, button) {
     const target = isPrivate(p.visibilitas) ? "public" : "private";
-    const label = target === "private" ? "privat (hanya Anda)" : "publik (semua pengguna)";
-    if (!confirm(`Jadikan puisi "${p.judul}" ${label}?`)) return;
+    const pesan = target === "private"
+        ? `Jadikan data puisi "${p.judul}" ini privat?\n\n` +
+          "Hanya Anda yang dapat mengakses data ini. Tautan publik dan sematan (embed) eksternal yang ada akan langsung berhenti berfungsi."
+        : `Jadikan data puisi "${p.judul}" ini publik?\n\n` +
+          "Siapa pun yang memiliki tautan atau akses ke daftar publik akan dapat melihat dan mengunduh data ini. Pastikan data tidak berisi informasi sensitif atau rahasia.";
+    if (!confirm(pesan)) return;
 
     button.disabled = true;
     try {
