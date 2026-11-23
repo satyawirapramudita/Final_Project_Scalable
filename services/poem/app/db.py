@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from contextlib import contextmanager
+from typing import Generator
 
 import pymysql
 from dbutils.pooled_db import PooledDB
@@ -45,6 +47,22 @@ DDL = [
         puisi_id INT         NOT NULL,
         tag      VARCHAR(60) NOT NULL,
         PRIMARY KEY (puisi_id, tag)
+    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
+    """,
+    # Transactional outbox: event ditulis dalam transaksi yang sama dengan
+    # perubahan puisi, lalu dikirim ke RabbitMQ oleh relay (app/outbox.py).
+    """
+    CREATE TABLE IF NOT EXISTS outbox (
+        id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+        event_id     CHAR(36)     NOT NULL,
+        routing_key  VARCHAR(64)  NOT NULL,
+        envelope     MEDIUMTEXT   NOT NULL,
+        created_at   DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        published_at DATETIME(3)  NULL,
+        attempts     INT          NOT NULL DEFAULT 0,
+        last_error   VARCHAR(255) NULL,
+        UNIQUE KEY uq_outbox_event (event_id),
+        KEY idx_outbox_pending (published_at, id)
     ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4
     """,
 ]
@@ -108,6 +126,32 @@ def _get_pool() -> PooledDB:
 def connect() -> pymysql.connections.Connection:
     """Ambil koneksi dari pool. close() mengembalikannya ke pool, bukan menutup."""
     return _get_pool().connection()
+
+
+@contextmanager
+def transaction(isolation: str | None = None) -> Generator:
+    """Cursor di dalam satu transaksi: commit bila blok selesai, rollback bila error.
+
+    Pool memakai autocommit=True; BEGIN eksplisit menahan autocommit sampai
+    COMMIT/ROLLBACK, jadi beberapa statement menjadi satu unit atomik.
+    """
+    conn = connect()
+    try:
+        with conn.cursor() as cur:
+            if isolation:
+                # Tanpa SESSION: hanya berlaku untuk transaksi berikutnya.
+                cur.execute(f"SET TRANSACTION ISOLATION LEVEL {isolation}")
+            conn.begin()
+            yield cur
+        conn.commit()
+    except BaseException:
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            log.warning("Rollback gagal", exc_info=True)
+        raise
+    finally:
+        conn.close()
 
 
 def _pool_stats() -> dict:

@@ -56,6 +56,8 @@ def test_unknown_poem_returns_pending_instead_of_false_404(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "pending"
+    # Hasil belum final tidak boleh disimpan micro-cache gateway.
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_ready_poem_returns_definitions_for_hover(monkeypatch) -> None:
@@ -76,6 +78,8 @@ def test_ready_poem_returns_definitions_for_hover(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["items"][0]["definisi"] == ["waktu setelah matahari terbenam"]
+    # Hasil final boleh di-cache gateway.
+    assert "cache-control" not in response.headers
 
 
 def test_deleted_poem_returns_404(monkeypatch) -> None:

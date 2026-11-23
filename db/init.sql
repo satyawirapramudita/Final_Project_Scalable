@@ -66,6 +66,22 @@ CREATE TABLE IF NOT EXISTS puisi_tag (
     PRIMARY KEY (puisi_id, tag)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
+-- Transactional outbox: event poem.* ditulis di transaksi yang sama dengan
+-- perubahan puisi, lalu dikirim ke RabbitMQ oleh relay (services/poem/app/outbox.py).
+-- Layanan poem juga membuat tabel ini saat start, untuk volume yang sudah ada.
+CREATE TABLE IF NOT EXISTS outbox (
+    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+    event_id     CHAR(36)     NOT NULL,
+    routing_key  VARCHAR(64)  NOT NULL,
+    envelope     MEDIUMTEXT   NOT NULL,
+    created_at   DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    published_at DATETIME(3)  NULL,
+    attempts     INT          NOT NULL DEFAULT 0,
+    last_error   VARCHAR(255) NULL,
+    UNIQUE KEY uq_outbox_event (event_id),
+    KEY idx_outbox_pending (published_at, id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
 -- ── wordcloud_db (Lindra) ──
 USE wordcloud_db;
 CREATE TABLE IF NOT EXISTS term_frequency (

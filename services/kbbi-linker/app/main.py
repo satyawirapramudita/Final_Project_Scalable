@@ -64,8 +64,17 @@ def metrics() -> Response:
 
 @app.get("/api/kbbi/{poem_id}")
 def get_poem_definitions(
-    poem_id: int = Path(gt=0), _user: dict = Depends(current_user)
+    response: Response, poem_id: int = Path(gt=0), _user: dict = Depends(current_user)
 ) -> dict:
+    result = _poem_definitions(poem_id)
+    if result.get("status") != "ready":
+        # Hasil belum final (mis. "pending"): jangan disimpan micro-cache gateway,
+        # agar "coba buka lagi sebentar" di frontend benar-benar mendapat hasil baru.
+        response.headers["Cache-Control"] = "no-store"
+    return result
+
+
+def _poem_definitions(poem_id: int) -> dict:
     poem = cache.get_poem(poem_id)
     poem_cached = poem is not None
     CACHE_RESULT.labels("poem", "hit" if poem_cached else "miss").inc()
