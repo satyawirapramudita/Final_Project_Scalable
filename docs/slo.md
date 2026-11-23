@@ -97,6 +97,57 @@ kali dan tidak diselidiki lebih lanjut.
 
 Satu replika melayani sekitar 160 r/s. Pada 64 VU, p95 baru turun di bawah 300 ms dengan 4 replika.
 
+### Pembaruan pengukuran (24 November 2026)
+
+Tabel di atas diambil pada lingkungan Docker Desktop (VM 6 GB) sebelum beberapa perbaikan.
+Pengukuran ulang di host 16 thread setelah perbaikan berikut:
+
+- micro-cache pencarian **per pengguna** di gateway (`API_SEARCH_CACHE_TTL`, kunci memuat token),
+- mitigasi TIME_WAIT/ephemeral port gateway (`net.ipv4.tcp_tw_reuse=1`, port range 10240–65535),
+- k6 `discardResponseBodies` + container k6 berjalan sebagai UID pemanggil,
+- metrik CPU dirata-ratakan dari 3 sampel (bukan satu instan).
+
+**Tanpa micro-cache gateway, 1 worker uvicorn per replika** (`--no-gateway-cache`):
+
+| VU | Throughput (r/s) | p50 (ms) | p95 (ms) | p99 (ms) | Error | CPU search/replika | CPU Redis | CPU MySQL |
+|---:|---:|---:|---:|---:|---|---:|---:|---:|
+| 1 | 701,6 | 1,0 | 4,4 | 8,1 | 0 % | 29 % | 4 % | 12 % |
+| 10 | 1.992,0 | 4,9 | 9,2 | 11,9 | 0 % | 64 % | 5 % | 5 % |
+| 40 | 2.014,0 | 19,8 | 37,9 | 46,3 | 0 % | 68 % | 4 % | 3 % |
+| 80 | **2.090,2** | 38,6 | 72,2 | 82,3 | 0 % | 71 % | 6 % | 26 % |
+
+- Titik jenuh **±10 VU** (1.992 r/s sudah 95 % puncak); setelah itu latensi naik hampir linear
+  (hukum Little) tanpa error. p95 tetap 72 ms di 80 VU, jadi SLO 300 ms **belum** terlanggar.
+- Bottleneck tetap **proses Python per replika** (71 % CPU); Redis 4–6 % dan MySQL 3–26 % bukan bottleneck.
+
+**Dengan micro-cache gateway** (konfigurasi bawaan):
+
+| VU | Throughput (r/s) | p95 (ms) | Cache hit | CPU gateway | CPU k6 |
+|---:|---:|---:|---:|---:|---:|
+| 10 | 61.398 | 0,2 | 100 % | 149 % | 597 % |
+| 40 | **85.254** | 1,1 | 100 % | 182 % | 777 % |
+| 80 | 84.634 | 2,2 | 100 % | 200 % | 832 % |
+
+- Angka ini **batas bawah**: yang jenuh adalah **klien k6** (777–832 % CPU, 8+ core), bukan gateway
+  (≤200 %). Dengan dua container k6, plafon gateway kemungkinan jauh lebih tinggi.
+- Tetap berlaku peringatan di atas: satu token + kosakata kecil membuat hit ratio ~100 %,
+  sehingga ini mengukur nginx, bukan layanan search.
+
+**Dengan `SEARCH_WORKERS=2` (dua proses uvicorn per container, tanpa micro-cache):**
+
+| VU | Throughput (r/s) | p50 (ms) | p95 (ms) | Error | CPU search/replika |
+|---:|---:|---:|---:|---|---:|
+| 10 | 3.184,4 | 2,9 | 5,4 | 0 % | 126–129 % |
+| 40 | **3.336,1** | 11,8 | 22,4 | 0 % | 136–137 % |
+| 80 | 3.165,0 | 23,9 | 49,9 | 0 % | 135–140 % |
+
+- Dua worker menaikkan kapasitas per replika dari ±1.050 r/s menjadi ±1.670 r/s (**1,66×**, efisiensi
+  ±83 %), dan menurunkan p50 pada beban yang sama (19,8 → 11,8 ms di 40 VU).
+- Metrik Prometheus tetap benar: `search_breaker_state` muncul sebagai **2 seri per replika**
+  (label `pid`) karena digabung lewat `PROMETHEUS_MULTIPROC_DIR`.
+- Setiap worker membuka pool DB sendiri (2 replika × 2 worker × `DB_POOL_SIZE` 10 = 40 koneksi
+  hanya untuk search) — perhitungkan `max_connections` MySQL.
+
 ## Batasan pengukuran
 
 - **Satu IP dan satu token.** Rate limit per IP harus dinaikkan, dan cache per pengguna terlihat lebih
@@ -111,6 +162,8 @@ Satu replika melayani sekitar 160 r/s. Pada 64 VU, p95 baru turun di bawah 300 m
 
 ## Langkah berikutnya
 
-1. Jalankan uvicorn dengan beberapa worker per container agar satu replika memakai lebih dari satu core.
+1. ~~Jalankan uvicorn dengan beberapa worker per container.~~ **Selesai (24 Nov 2026):**
+   `SEARCH_WORKERS` (default 1) di `docker-compose.yml`; diuji 2 worker → 1,66× kapasitas
+   per replika, metrik tetap teragregasi.
 2. Tambahkan alert Prometheus untuk SLO di atas (p95/p99 search, rasio 5xx, DLQ tidak kosong).
 3. Uji beban campuran pencarian dan kirim puisi untuk melihat persaingan di MySQL.
