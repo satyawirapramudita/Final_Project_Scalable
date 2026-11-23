@@ -16,7 +16,7 @@ Tujuh layanan di balik satu gerbang Nginx:
 |---|---|---|
 | `gateway` (Nginx) | Pintu masuk tunggal, static, rate limit, X-Request-ID | Anders |
 | `auth` | Register/login, terbitkan JWT | Ardi |
-| `poem` | CRUD puisi, publish event, cache baca | Satya |
+| `poem` | CRUD puisi, publish event (transactional outbox), cache baca | Satya |
 | `nlp-worker` | Pipeline NLP → `poem.analyzed` | Satya |
 | `wordcloud` | Frekuensi istilah dominan | Lindra |
 | `search` | Indeks & pencarian | Anders |
@@ -44,7 +44,7 @@ Final_Project_Scalable/
 ├── db/init.sql              # skema auth_db, poem_db, wordcloud_db, kbbi_db, search_db
 ├── shared/                  # events.py (kontrak event), metrics.py (histogram latensi)
 ├── observability/           # Prometheus, Grafana (dashboard), plugin RabbitMQ; lihat observability/README.md
-├── loadtest/                # skrip k6 (search)
+├── loadtest/                # skrip k6 (search, submit) + scale_test.py (uji 1..N replika)
 ├── docs/event-contracts.md  # dokumentasi kontrak event
 ├── lambda/                  # fitur gambar puisi (dari Tugas 1)
 ├── lambda-canvas-cdn/       # aset generator gambar (dari Tugas 1)
@@ -125,6 +125,23 @@ MySQL restart (`ping=1`). Ukuran via env `DB_POOL_MIN` (default 2) dan `DB_POOL_
 naikkan `DB_POOL_MAX` saat stress test bila MySQL punya `max_connections` lebih besar. Pemakaian pool
 pantau lewat metrik `db_pool_connections{service,state=idle|in_use}`; hasil dedup idempotency lewat
 `idempotency_total{service,result=new|replay|conflict}`.
+
+**Replika.** auth, poem, search, wordcloud, kbbi-linker, dan nlp-worker berjalan **2 replika** secara
+default (`deploy.replicas`). Ubah lewat `.env` (`AUTH_REPLICAS`, `POEM_REPLICAS`, `SEARCH_REPLICAS`,
+`WORDCLOUD_REPLICAS`, `KBBI_REPLICAS`, `NLP_WORKER_REPLICAS`) atau sementara dengan
+`docker compose up -d --scale search=4`. Gateway membagi request ke semua replika lewat DNS Docker
+(`resolver 127.0.0.11 valid=10s`), Prometheus men-scrape tiap replika, dan worker berbagi antrean
+(competing consumers). Satu replika mati tidak memutus layanan.
+
+**Transactional outbox (poem).** Perubahan puisi dan event-nya (`poem.created/updated/deleted`) ditulis
+dalam **satu transaksi MySQL** (tabel `outbox`), lalu relay di tiap replika poem mengirimnya ke RabbitMQ
+(`SELECT ... FOR UPDATE SKIP LOCKED`, publisher confirms). Saat RabbitMQ mati, submit tetap sukses dan
+event dikirim otomatis begitu broker pulih; tidak ada event yang hilang. Pantau lewat
+`poem_outbox_pending`, `poem_outbox_oldest_pending_seconds`, `poem_outbox_published_total`, dan
+`poem_outbox_relay_errors_total`. Pengiriman bersifat *at-least-once* (konsumen sudah idempoten).
+
+**Uji skalabilitas.** `python loadtest/scale_test.py` menjalankan k6 lewat gateway pada 1–4 replika
+search dan mencetak throughput, p50/p95/p99, serta CPU per replika (hasil di `loadtest/results/`).
 
 ## Kontrak event
 
