@@ -61,6 +61,10 @@ server {
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options        SAMEORIGIN always;
     add_header Referrer-Policy        strict-origin-when-cross-origin always;
+    # HIT/MISS/STALE/... hanya di location yang memakai cache; nilai kosong
+    # (location lain) membuat nginx tidak mengirim header ini. Ditaruh di level
+    # server karena add_header di dalam location mematikan pewarisan header di atas.
+    add_header X-Cache-Status         $upstream_cache_status always;
 
     # ── Error buatan gateway dalam bentuk JSON ──
     # (respons error dari layanan sendiri diteruskan apa adanya)
@@ -153,9 +157,21 @@ server {
     # (puisi privat hanya untuk pemiliknya). Layanan wordcloud/kbbi tidak berubah.
     # error_page di dalam location menggantikan seluruh error_page level server,
     # jadi yang umum ditulis ulang.
+    #
+    # Micro-cache: respons wordcloud/kbbi tidak bergantung pada pengguna (handler
+    # tidak memakai identitas user), jadi aman dibagi antar-pengguna dengan key
+    # tanpa user. Aman karena auth_request berjalan di fase access, SEBELUM cache
+    # dibaca: token tidak valid -> 401, puisi privat/terhapus -> 404, walau ada
+    # salinan di cache. Hanya 200 yang di-cache. Matikan dengan API_CACHE=off.
     location ^~ /api/wordcloud/ {
         limit_req zone=api_limit burst=${API_BURST} nodelay;
         auth_request /_poem_access;
+        proxy_cache                   ${API_CACHE};
+        proxy_cache_key               "$request_uri";
+        proxy_cache_valid             200 ${API_CACHE_TTL};
+        proxy_cache_lock              on;
+        proxy_cache_use_stale         error timeout updating http_502 http_503 http_504;
+        proxy_cache_background_update on;
         error_page 401 = @err_401;
         error_page 403 = @err_poem_404;
         error_page 500 = @err_access;
@@ -174,6 +190,13 @@ server {
     location ^~ /api/kbbi/ {
         limit_req zone=api_limit burst=${API_BURST} nodelay;
         auth_request /_poem_access;
+        # Micro-cache, alasan keamanan sama dengan /api/wordcloud/ di atas.
+        proxy_cache                   ${API_CACHE};
+        proxy_cache_key               "$request_uri";
+        proxy_cache_valid             200 ${API_CACHE_TTL};
+        proxy_cache_lock              on;
+        proxy_cache_use_stale         error timeout updating http_502 http_503 http_504;
+        proxy_cache_background_update on;
         error_page 401 = @err_401;
         error_page 403 = @err_poem_404;
         error_page 500 = @err_access;

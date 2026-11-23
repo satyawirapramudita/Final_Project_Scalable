@@ -33,6 +33,9 @@ services:
       NGINX_ENVSUBST_FILTER: "^API_"
       API_RATE_LIMIT: ${API_RATE_LIMIT:-20r/s}
       API_BURST: ${API_BURST:-40}
+      # Micro-cache wordcloud/kbbi: zona cache (off = nonaktif) dan masa berlaku.
+      API_CACHE: ${API_CACHE:-api_cache}
+      API_CACHE_TTL: ${API_CACHE_TTL:-30s}
     volumes:
       # `z` menandai file/direktori host dengan label SELinux container_file_t —
       # tanpa ini, di host SELinux enforcing (Fedora/RHEL) proses container

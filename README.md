@@ -143,6 +143,16 @@ event dikirim otomatis begitu broker pulih; tidak ada event yang hilang. Pantau 
 **Uji skalabilitas.** `python loadtest/scale_test.py` menjalankan k6 lewat gateway pada 1–4 replika
 search dan mencetak throughput, p50/p95/p99, serta CPU per replika (hasil di `loadtest/results/`).
 
+**Micro-cache gateway.** Nginx menyimpan respons 200 `GET /api/wordcloud/{id}` dan `/api/kbbi/{id}`
+selama `API_CACHE_TTL` (default 30 dtk), dibagi antar-pengguna karena isinya tidak bergantung pada
+pengguna. Aman: `auth_request` (pemeriksaan akses puisi) tetap berjalan **sebelum** cache dibaca, jadi
+token tidak valid tetap 401 dan puisi yang dijadikan privat atau dihapus langsung 404 walau ada
+salinannya di cache. `proxy_cache_lock` mencegah stampede, `proxy_cache_use_stale` tetap menjawab saat
+layanan mati, dan kbbi mengirim `Cache-Control: no-store` untuk hasil yang belum final (`pending`).
+Status terlihat di header `X-Cache-Status` dan field `cache` log gateway. search dan poem **tidak**
+di-cache di gateway (isinya bergantung pada pengguna). Matikan dengan `API_CACHE=off`; bandingkan
+dengan `python loadtest/cache_test.py`.
+
 ## Kontrak event
 
 Lihat [`docs/event-contracts.md`](docs/event-contracts.md) dan [`shared/events.py`](shared/events.py).
