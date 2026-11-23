@@ -1,5 +1,6 @@
 # Environment / secret
 .env
+.env.bak*
 *.env.local
 
 # Python

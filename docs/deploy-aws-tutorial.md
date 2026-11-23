@@ -37,15 +37,27 @@ Konsol: **Billing → Budgets → Create budget → Use a template → Monthly c
 
 ---
 
-## 2. Buat secret produksi (di laptop/repo)
+## 2. Buat secret produksi — **di server**, bukan di checkout dev
 
-```bash
-git clone https://github.com/satyawirapramudita/Final_Project_Scalable.git
-cd Final_Project_Scalable
-bash deploy/gen-secrets.sh
+`deploy/gen-secrets.sh` dijalankan **di EC2 sesudah clone** (langkah 6). Skrip ini menolak
+menimpa `.env` yang sudah ada — itu pengaman, bukan error:
+
+- Di checkout **dev** (stack lokal sudah pernah `up`), `.env` berisi password yang cocok dengan
+  **volume MySQL yang sudah ada**. Menimpanya membuat auth/poem/search gagal
+  `Access denied for user` (dan `db/02-env-passwords.sh` tidak jalan pada volume lama).
+- Di **EC2 clone baru**, `.env` belum ada, sehingga skrip berjalan normal.
+
+Kalau Anda melihat pesan ini di laptop:
+
+```
+ERROR: .env sudah ada. Jalankan 'bash deploy/gen-secrets.sh --force' untuk menimpa.
 ```
 
-Skrip ini membuat `.env` (mode 600) dengan password acak untuk MySQL root, 5 user DB,
+**Jangan pakai `--force`.** Itu artinya Anda menjalankannya di checkout dev; lanjutkan saja
+ke langkah 3. (Kalau `--force` benar-benar diperlukan, `.env` lama otomatis disimpan sebagai
+`.env.bak.<timestamp>`.)
+
+Yang dibuat skrip: `.env` (mode 600) dengan password acak untuk MySQL root, 5 user DB,
 RabbitMQ, `JWT_SECRET` (48 karakter), dan Grafana.
 
 > Password user DB **tidak perlu** disamakan manual dengan `db/init.sql`.
@@ -135,6 +147,9 @@ ssh -i ~/Downloads/puisi-key.pem ubuntu@<EIP>
 
 git clone https://github.com/satyawirapramudita/Final_Project_Scalable.git
 cd Final_Project_Scalable
+
+# Clone baru belum punya .env. Kalau ada (mis. hasil `cp .env.example .env`):
+#   mv .env .env.bak
 bash deploy/gen-secrets.sh
 
 nano .env

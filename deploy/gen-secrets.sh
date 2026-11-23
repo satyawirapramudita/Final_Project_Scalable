@@ -10,9 +10,24 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [[ -f .env && "${1:-}" != "--force" ]]; then
-    echo "ERROR: .env sudah ada. Jalankan 'bash deploy/gen-secrets.sh --force' untuk menimpa." >&2
-    exit 1
+if [[ -f .env ]]; then
+    if [[ "${1:-}" != "--force" ]]; then
+        cat >&2 <<'MSG'
+ERROR: .env sudah ada — tidak ditimpa.
+
+  - Checkout DEV (stack lokal sudah jalan): JANGAN diganti. Password di .env
+    cocok dengan volume MySQL yang sudah ada; menimpanya membuat layanan gagal
+    "Access denied for user". Lanjutkan tanpa skrip ini.
+  - EC2 (clone baru): .env seharusnya belum ada. Kalau ada karena salinan
+    .env.example, pindahkan dulu:  mv .env .env.bak
+  - Kalau benar-benar perlu menimpa:  bash deploy/gen-secrets.sh --force
+    (file lama otomatis disimpan sebagai .env.bak.<timestamp>)
+MSG
+        exit 1
+    fi
+    backup=".env.bak.$(date +%Y%m%d-%H%M%S)"
+    cp -p .env "$backup"
+    echo "Backup .env lama -> $backup"
 fi
 
 python3 - <<'PY'
