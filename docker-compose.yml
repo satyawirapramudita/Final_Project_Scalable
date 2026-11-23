@@ -36,6 +36,8 @@ services:
       # Micro-cache wordcloud/kbbi: zona cache (off = nonaktif) dan masa berlaku.
       API_CACHE: ${API_CACHE:-api_cache}
       API_CACHE_TTL: ${API_CACHE_TTL:-30s}
+      # Micro-cache pencarian per pengguna (kunci memuat token), sengaja pendek.
+      API_SEARCH_CACHE_TTL: ${API_SEARCH_CACHE_TTL:-10s}
     volumes:
       # `z` menandai file/direktori host dengan label SELinux container_file_t —
       # tanpa ini, di host SELinux enforcing (Fedora/RHEL) proses container
