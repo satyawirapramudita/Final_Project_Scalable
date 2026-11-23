@@ -2,7 +2,13 @@
 
 import pytest
 
-from app.breaker import CLOSED, HALF_OPEN, OPEN, BreakerOpen, CircuitBreaker
+from services.search.app.breaker import (
+    CLOSED,
+    HALF_OPEN,
+    OPEN,
+    BreakerOpen,
+    CircuitBreaker,
+)
 
 
 class Clock:

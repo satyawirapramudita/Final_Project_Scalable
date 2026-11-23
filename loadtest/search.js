@@ -18,7 +18,7 @@
 
 import http from 'k6/http';
 import { check } from 'k6';
-import { Rate } from 'k6/metrics';
+import { Counter, Rate } from 'k6/metrics';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const TOKEN = __ENV.TOKEN;
@@ -26,6 +26,10 @@ const TOKEN = __ENV.TOKEN;
 export const options = {
   vus: Number(__ENV.VUS || 20),
   duration: __ENV.DURATION || '30s',
+  // Body respons tidak dipakai (check hanya membaca status + header), jadi
+  // jangan diunduh: tanpa ini k6 menghabiskan ~100 µs CPU per request dan
+  // menjadi bottleneck pengukuran (terbukti: k6 840% CPU vs gateway 198%).
+  discardResponseBodies: true,
   thresholds: {
     http_req_duration: ['p(95)<500'],
     errors: ['rate<0.01'],
@@ -33,8 +37,20 @@ export const options = {
 };
 
 const errors = new Rate('errors');
+// Rincian status: tanpa ini, "error 52%" tidak bisa dibedakan antara
+// rate limit (4xx), gateway/upstream gagal (5xx), atau koneksi putus (0).
+const resp2xx = new Counter('resp_2xx');
+const resp4xx = new Counter('resp_4xx');
+const resp5xx = new Counter('resp_5xx');
+const respConnError = new Counter('resp_conn_error');
+// Hit ratio micro-cache gateway: memisahkan "dilayani cache" dari "sampai ke
+// layanan search". Tanpa angka ini, throughput hanya mencerminkan nginx.
+const cacheHits = new Rate('gateway_cache_hit');
 
-// Campuran: kata populer (sering kena cache) dan kombinasi acak (menembus cache).
+// Campuran kueri. Catatan: kardinalitasnya kecil (7 populer + 900 pasangan +
+// 450 kombinasi kategori), jadi pada beban tinggi hampir semua request tetap
+// kena micro-cache gateway. Untuk mengukur kapasitas search yang sebenarnya,
+// jalankan stress_test.py dengan --no-gateway-cache (lihat hit ratio per tahap).
 const POPULAR = ['senja', 'laut', 'rindu', 'hujan malam', 'bintang', 'angin', 'cinta'];
 const VOCAB = ['senja', 'laut', 'rindu', 'hujan', 'malam', 'bintang', 'angin', 'embun', 'bulan', 'sunyi',
   'kenangan', 'pagi', 'cakrawala', 'ombak', 'pantai', 'gunung', 'sungai', 'daun', 'kabut', 'cahaya',
@@ -60,4 +76,10 @@ export default function () {
   });
   const ok = check(res, { 'status 200': (r) => r.status === 200 });
   errors.add(!ok);
+
+  if (res.status === 0) respConnError.add(1);
+  else if (res.status < 300) resp2xx.add(1);
+  else if (res.status < 500) resp4xx.add(1);
+  else resp5xx.add(1);
+  cacheHits.add(res.headers['X-Cache-Status'] === 'HIT');
 }

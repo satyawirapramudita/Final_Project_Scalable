@@ -197,15 +197,25 @@ function mapTemplateToNumber(templateValue) {
     return match ? match[1] : "1";
 }
 
+// Form menyimpan nomor template ("1".."4"); Lambda memakai nama file di S3.
+function templateFileName(templateValue) {
+    if (typeof templateValue === "string" && /\.(jpe?g|png)$/i.test(templateValue)) {
+        return templateValue;
+    }
+    return `template${mapTemplateToNumber(templateValue)}.jpg`;
+}
+
 function buildGeneratorUrl(params) {
     const base = (GENERATOR_BASE_URL || "").replace(/\/$/, "");
     const qs = new URLSearchParams({
-        template: mapTemplateToNumber(params.template),
+        template: templateFileName(params.template),
         judul: params.judul || "",
         penulis: params.penulis || "",
         bait: params.bait || "",
-        // Lambda kita pakai mode=preview / mode=save, bukan save=true/false
-        mode: params.save ? "save" : "preview",
+        // Kontrak Lambda (lihat lambda/generate-puisi-image/README.md):
+        // save=true -> render + unggah ke S3 dan balas {ok, filename};
+        // selain itu -> balas gambar JPEG (base64) untuk preview.
+        save: params.save ? "true" : "false",
     });
     if (params.save) {
         // Nonce agar tidak ada cache lama yang terlayani untuk permintaan save
@@ -251,7 +261,9 @@ async function saveImage(params) {
         const res = await fetch(url);
         if (!res.ok) return null;
         const json = await res.json().catch(() => null);
-        // Lambda kita mengembalikan { success, key, bucket, ... } bukan { ok, filename }
+        // Kontrak Lambda: { ok: true, filename }. { success, key } dipertahankan
+        // untuk kompatibilitas dengan versi Lambda yang lebih lama.
+        if (json && json.ok && json.filename) return json.filename;
         return (json && json.success && json.key) ? json.key : null;
     } catch {
         return null;

@@ -167,6 +167,15 @@ Pemilik schema: **Satya**. Perubahan bersifat *additive*.
 Rencana & langkah deployment AWS ada di [`docs/deployment.md`](docs/deployment.md)
 (EC2 + Docker Compose; S3 + CloudFront + Lambda; region `us-east-1`).
 
+**Tutorial dari nol sampai running:** [`docs/deploy-aws-tutorial.md`](docs/deploy-aws-tutorial.md).
+Skrip bantu ada di `deploy/`:
+
+| Skrip | Kegunaan |
+|---|---|
+| `deploy/gen-secrets.sh` | membuat `.env` produksi dengan secret acak (mode 600) |
+| `deploy/ec2-bootstrap.sh` | user-data EC2 Ubuntu 24.04: Docker, Compose v2, swap 4 GB, rotasi log |
+| `deploy/backup-mysql.sh` | `mysqldump` semua database + unggah ke S3 (opsional) |
+
 ## Aturan kontribusi
 
 1. Setiap layanan punya `Dockerfile` + `/health` + `/metrics`.

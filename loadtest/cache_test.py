@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import subprocess
 import sys
@@ -65,15 +66,24 @@ def k6_wordcloud(token: str, ids: list[int], vus: int, duration: str) -> dict:
     out = "_k6-wordcloud.json"
     cmd = [
         "docker", "run", "--rm", "-i", "--network", "puisi-scalable_edge",
-        "-v", f"{RESULTS.as_posix()}:/out",
+        # `z` = relabel SELinux container_file_t (lihat scale_test.py).
+        "-v", f"{RESULTS.as_posix()}:/out:z",
+        # k6 berjalan sebagai UID 12345 di image; tulis /out sebagai UID:GID
+        # pemanggil (pemilik direktori hasil). Lihat scale_test.py.
+        "--user", f"{os.getuid()}:{os.getgid()}",
         "-e", "BASE_URL=http://gateway", "-e", f"TOKEN={token}",
         "-e", f"IDS={','.join(map(str, ids))}", "-e", f"VUS={vus}", "-e", f"DURATION={duration}",
         "grafana/k6", "run", "--quiet", "--summary-trend-stats", "avg,med,p(95),p(99),max",
         "--summary-export", f"/out/{out}", "-",
     ]
     with open(ROOT / "loadtest" / "wordcloud.js", encoding="utf-8") as f:
-        subprocess.run(cmd, cwd=ROOT, stdin=f, capture_output=True, text=True)
+        proc = subprocess.run(cmd, cwd=ROOT, stdin=f, capture_output=True, text=True)
     path = RESULTS / out
+    if not path.exists():
+        raise RuntimeError(
+            f"k6 tidak menulis {out} (exit {proc.returncode}). stderr:\n"
+            f"{proc.stderr[-1500:]}"
+        )
     m = json.loads(path.read_text(encoding="utf-8"))["metrics"]
     path.unlink()
     d = m["http_req_duration"]
@@ -104,7 +114,7 @@ def main() -> int:
             wait_healthy(["puisi-gateway"])
             k6_wordcloud(token, ids, args.vus, "10s")  # warm-up
             cpu: dict = {}
-            sampler = threading.Thread(target=sample_cpu, args=(cpu, parse_seconds(args.duration) / 2))
+            sampler = threading.Thread(target=sample_cpu, args=(cpu, parse_seconds(args.duration)))
             sampler.start()
             res = k6_wordcloud(token, ids, args.vus, args.duration)
             sampler.join()

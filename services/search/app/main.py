@@ -11,12 +11,19 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 
 import pymysql
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
+    Counter,
+    generate_latest,
+    multiprocess,
+)
 
 from shared.metrics import REQUEST_SECONDS, route_path
 
@@ -95,6 +102,17 @@ def health() -> dict:
 
 @app.get("/metrics")
 def metrics() -> Response:
+    """Metrik Prometheus.
+
+    Bila container dijalankan dengan lebih dari satu worker uvicorn
+    (UVICORN_WORKERS>1), setiap worker punya registry sendiri. MultiProcessCollector
+    menggabungkan nilai dari semua worker lewat direktori PROMETHEUS_MULTIPROC_DIR,
+    jadi angka yang di-scrape tidak bergantung pada worker mana yang menjawab.
+    """
+    if os.getenv("PROMETHEUS_MULTIPROC_DIR"):
+        registry = CollectorRegistry()
+        multiprocess.MultiProcessCollector(registry)
+        return Response(generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 

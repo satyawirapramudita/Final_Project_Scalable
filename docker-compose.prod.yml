@@ -1,6 +1,9 @@
-# Override untuk deployment EC2.
+# Override untuk deployment EC2 (production).
 # Pakai: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 services:
   gateway:
+    # Di EC2 gateway harus mendengarkan port 80: origin CloudFront maupun
+    # akses langsung lewat Elastic IP. Port 8080 dari compose dasar tetap ada
+    # (berguna untuk smoke test lokal) dan ditutup lewat Security Group.
     ports:
       - "80:80"

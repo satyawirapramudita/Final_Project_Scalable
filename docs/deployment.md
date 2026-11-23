@@ -5,6 +5,36 @@
 **Region AWS:** `us-east-1` (US East / N. Virginia) — wajib, sesuai Hands-on 1
 **Status:** dokumen deployment — dijalankan **setelah development fungsional selesai (F8)**
 
+> **Tutorial langkah-demi-langkah (EC2 + S3 + CloudFront + Lambda, dari nol sampai running):**
+> [`docs/deploy-aws-tutorial.md`](deploy-aws-tutorial.md).
+> Dokumen ini menjelaskan *mengapa*; tutorial menjelaskan *perintah dan klik*-nya.
+
+---
+
+## 0. Ringkasan cepat Jalur A
+
+| Hal | Nilai |
+|---|---|
+| Instance | **t3.large** (8 GB, 30 GB gp3) — `t3.medium` cukup untuk demo trafik rendah |
+| Perintah deploy | `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build` |
+| Container | 19 (12 container aplikasi dari 2 replika + gateway + MySQL/Redis/RabbitMQ + observability) |
+| Port publik | **80** (gateway). Grafana/Prometheus/RabbitMQ UI hanya `127.0.0.1` → SSH tunnel |
+| Secret | `bash deploy/gen-secrets.sh` (membuat `.env` acak, mode 600) |
+| Password DB | `db/02-env-passwords.sh` menyamakan user MySQL dengan `.env` saat volume baru |
+| Backup | `BACKUP_S3=s3://<bucket>/backups bash deploy/backup-mysql.sh` |
+| Log | dibatasi 10 MB × 3 per container (compose + `daemon.json` di bootstrap) |
+
+**Kapasitas terukur (lokal, 2 replika, data 1.000 puisi):**
+
+| Skenario | Throughput | Latensi | Catatan |
+|---|---:|---|---|
+| `GET /api/search`, micro-cache **mati** | **±2.100 r/s** | p95 36 ms @40 VU | angka kapasitas layanan search (±1.050 r/s per replika) |
+| `GET /api/search`, micro-cache **aktif** | ±77.000 r/s | p95 1,2 ms | batas **klien k6**, bukan batas gateway |
+| `POST /api/poems` (idempotency aktif) | ±200 r/s | p95 96–111 ms | 0 duplikat pada 4.164 submit paralel |
+
+Angka di EC2 akan lebih rendah (vCPU lebih sedikit); uji ulang di instance sebenarnya
+sebelum mengutip di laporan.
+
 ---
 
 ## 1. Prinsip

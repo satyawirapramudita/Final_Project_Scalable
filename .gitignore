@@ -12,6 +12,9 @@ venv/
 # Node (lambda)
 node_modules/
 
+# Hasil uji beban (dibuat ulang tiap run, bukan artefak repo)
+loadtest/results/
+
 # Logs & OS
 *.log
 .DS_Store

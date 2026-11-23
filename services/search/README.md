@@ -45,10 +45,35 @@ Database `search_db` dan pengguna `search_user` dibuat oleh `db/init.sql` hanya 
 Pada volume yang sudah ada, jalankan `CREATE DATABASE/USER/GRANT` untuk `search_db` secara manual (atau `docker compose down -v`).
 
 Uji beban: `loadtest/search.js` (k6). Metrik di `/metrics`: `http_request_duration_seconds`,
-`search_cache_total{result}`, `search_events_total{event,outcome}`, `search_db_pool_timeouts_total`.
+`search_cache_total{result}`, `search_events_total{event,outcome}`, `search_db_pool_timeouts_total`,
+`search_breaker_state`, dan `search_breaker_rejected_total`.
+
+Dengan lebih dari satu worker uvicorn (`SEARCH_WORKERS`), `/metrics` menggabungkan angka dari
+semua worker lewat `PROMETHEUS_MULTIPROC_DIR`, jadi hasil scrape tidak bergantung pada worker
+mana yang menjawab.
+
+## Skala
+
+Hasil uji beban lokal (`loadtest/stress_test.py --no-gateway-cache`, 2 replika):
+
+| Konfigurasi | Kapasitas | Catatan |
+|---|---:|---|
+| 1 proses uvicorn / container | ±1.000 r/s per replika | CPU ±70% (satu core, GIL), p95 < 100 ms |
+| 2 replika | ±2.100 r/s | latency naik linear setelah jenuh (antrean), bukan error |
+| micro-cache gateway aktif | ±77.000 r/s | batas klien k6, bukan batas gateway |
+
+Menaikkan kapasitas ada dua tuas:
+
+1. **Replika** (`SEARCH_REPLICAS` atau `--scale search=N`) — sesuai pola layanan stateless di
+   proyek ini; Prometheus otomatis ikut semua replika (DNS service discovery).
+2. **Worker per container** (`SEARCH_WORKERS=2..4`) — memakai lebih banyak core per container.
+   Inisialisasi skema diserialkan antar-worker (flock) agar DDL tidak balapan.
+   Setiap worker membuka pool DB sendiri: 2 replika × 2 worker × `DB_POOL_SIZE` (10) = 40
+   koneksi hanya untuk search, jadi perhitungkan `max_connections` MySQL (default 151).
 
 ## Batasan yang diketahui
 
-- Satu proses melayani sekitar 200 req/s sebelum CPU penuh (terukur lokal, 20% request menembus cache); skala dengan menambah replika.
+- Satu proses uvicorn memakai satu core. Tanpa menambah replika/worker, throughput mentok
+  sekitar 1.000 r/s per container (CPU ±70%, sisanya menunggu I/O Redis/MySQL).
 - MySQL FULLTEXT tidak melakukan stemming bahasa Indonesia dan mengabaikan kata di bawah 3 huruf pada indeks.
 - Puisi yang dihapus saat search mati tidak terdeteksi oleh `reindex_search.py`.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import logging
 import queue
 import threading
@@ -165,8 +166,25 @@ def _close(conn: pymysql.connections.Connection) -> None:
 
 pool = Pool(config.DB_POOL_SIZE, config.DB_POOL_TIMEOUT)
 
+# Lock antar-worker (satu container) untuk inisialisasi skema; lihat init_schema.
+_SCHEMA_LOCK = "/tmp/search_schema_init.lock"
+
 
 def init_schema(retries: int = 30, delay: int = 2) -> None:
+    """Siapkan skema MySQL; aman dijalankan beberapa worker sekaligus.
+
+    uvicorn dengan lebih dari satu worker menjalankan lifespan di setiap worker.
+    DDL-nya idempoten, tetapi pola cek-lalu-ALTER di MIGRATIONS bisa balapan
+    (dua worker sama-sama melihat kolom belum ada, lalu ALTER kedua gagal).
+    flock menyerialkan inisialisasi antar-proses dalam container yang sama:
+    worker pertama mengerjakan, worker lain menunggu lalu memverifikasi.
+    """
+    with open(_SCHEMA_LOCK, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        _init_schema(retries, delay)
+
+
+def _init_schema(retries: int, delay: int) -> None:
     last: Exception | None = None
     for attempt in range(1, retries + 1):
         try:

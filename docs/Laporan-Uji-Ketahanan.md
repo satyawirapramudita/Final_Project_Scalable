@@ -126,7 +126,7 @@ idempotency; hasil ulang: 0 anomali.
 | 2 | Autoheal exit 127: `autoheal: not found` | tag `willfarrell/autoheal:1.2.0` = build 2021 cacat (tag resmi hanya latest/1.1.0/v0.7.0) | pin per-digest build resmi terkini (amd64) |
 | 3 | Autoheal exit 1: `unix socket is currently not available` | SELinux memblokir akses `docker.sock` dari container | `security_opt: [label:disable]` |
 | 4 | Grafana gagal: port 3000 terpakai (`nawacakra-website-web-1`) | port hardcoded | env `GRAFANA_PORT` (default 3001 lokal) |
-| 5 | auth/poem exit: `Access denied for user` | `db/init.sql` hardcode password dev ≠ `.env` acak | `.env` disamakan dengan init.sql; tindak lanjut: init berbasis env |
+| 5 | auth/poem exit: `Access denied for user` | `db/init.sql` hardcode password dev ≠ `.env` acak | `.env` disamakan saat itu; **kini permanen**: `db/02-env-passwords.sh` menjalankan `ALTER USER` dari nilai `.env` saat volume MySQL baru dibuat |
 
 Semua kelima masalah bersifat **pre-existing** (terletak saat stack pertama kali di-up penuh
 sejak commit observability), bukan regresi dari fitur baru.
@@ -140,7 +140,9 @@ sejak commit observability), bukan regresi dari fitur baru.
    429 dapat didemokan.
 2. **[Verifikasi menunggu]** `COUNT(*)` puisi "Uji Duplikat%" harus = 4164
    (1988 run pertama + 2176 run ulang) — bukti nol duplikasi di DB.
-3. **[Infra]** `db/init.sql` masih hardcode password dev → ganti ke inisialisasi berbasis env.
+3. **[Infra — selesai]** Password user DB kini berasal dari `.env` lewat
+   `db/02-env-passwords.sh` (dijalankan MySQL setelah `db/init.sql` pada volume baru).
+   Untuk volume lama: `docker compose exec -T mysql sh /docker-entrypoint-initdb.d/02-env-passwords.sh`.
 4. **[Opsional]** Reset koneksi sporadik (~18× di 14 ribu request) — tunjuk keep-alive /
    `--limit-concurrency` uvicorn bila muncul lagi di beban lebih tinggi.
 5. **[Repo]** Semua perubahan belum di-commit (fitur + fix infra + script uji).
