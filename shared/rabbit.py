@@ -78,43 +78,81 @@ def declare_topology(channel: pika.adapters.blocking_connection.BlockingChannel)
 class Publisher:
     """Publisher thread-safe dengan publisher confirms dan reconnect."""
 
-    def __init__(self, host: str, port: int, user: str, password: str, vhost: str = "/") -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        user: str,
+        password: str,
+        vhost: str = "/",
+        *,
+        connect_retries: int = 30,
+    ) -> None:
         self._cfg = (host, port, user, password, vhost)
+        # Relay outbox memakai connect_retries=1: ia punya backoff sendiri dan
+        # tidak boleh tertahan ~1 menit di connect() saat RabbitMQ mati.
+        self._connect_retries = connect_retries
         self._lock = threading.Lock()
         self._conn: pika.BlockingConnection | None = None
         self._ch = None
 
     def _ensure(self) -> None:
         if self._conn is None or self._conn.is_closed:
-            self._conn = connect(*self._cfg)
+            self._conn = connect(*self._cfg, retries=self._connect_retries)
             self._ch = self._conn.channel()
             self._ch.confirm_delivery()
             declare_topology(self._ch)
 
-    def publish(self, event_name: str, payload: dict, correlation_id: str | None = None) -> str:
-        envelope = events.EventEnvelope(
-            event_name=event_name, payload=payload, correlation_id=correlation_id
-        )
-        body = json.dumps(envelope.to_dict(), ensure_ascii=False).encode("utf-8")
+    def ensure(self) -> None:
+        """Pastikan koneksi siap (raise bila RabbitMQ tidak terjangkau)."""
+        with self._lock:
+            self._ensure()
+
+    def heartbeat(self) -> None:
+        """Layani heartbeat AMQP saat publisher menganggur.
+
+        BlockingConnection hanya memproses heartbeat ketika dipakai; tanpa ini
+        broker menutup koneksi yang lama diam dan publish berikutnya gagal sekali.
+        """
+        with self._lock:
+            if self._conn is not None and self._conn.is_open:
+                try:
+                    self._conn.process_data_events(time_limit=0)
+                except Exception:  # noqa: BLE001
+                    self._conn = None
+
+    def publish_raw(self, routing_key: str, body: bytes, message_id: str) -> None:
+        """Publish amplop yang sudah jadi (dipakai relay outbox).
+
+        Dengan publisher confirms, fungsi ini baru kembali setelah broker
+        menerima pesan; kegagalan selalu berupa exception.
+        """
         with self._lock:
             for attempt in range(2):
                 try:
                     self._ensure()
                     self._ch.basic_publish(
                         exchange=events.EXCHANGE,
-                        routing_key=event_name,
+                        routing_key=routing_key,
                         body=body,
                         properties=pika.BasicProperties(
                             content_type="application/json",
                             delivery_mode=2,
-                            message_id=envelope.event_id,
+                            message_id=message_id,
                         ),
                     )
-                    return envelope.event_id
+                    return
                 except Exception:  # noqa: BLE001
                     self._conn = None
                     if attempt == 1:
                         raise
+
+    def publish(self, event_name: str, payload: dict, correlation_id: str | None = None) -> str:
+        envelope = events.EventEnvelope(
+            event_name=event_name, payload=payload, correlation_id=correlation_id
+        )
+        body = json.dumps(envelope.to_dict(), ensure_ascii=False).encode("utf-8")
+        self.publish_raw(event_name, body, envelope.event_id)
         return envelope.event_id
 
 

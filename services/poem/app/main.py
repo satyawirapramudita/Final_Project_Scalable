@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from shared import events, idempotency
 from shared.metrics import REQUEST_SECONDS, route_path
 
-from . import cache, config, db, messaging
+from . import cache, config, db, messaging, outbox
 from .security import current_user
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -262,6 +262,7 @@ def handle_analyzed(data: dict) -> None:
 async def lifespan(_app: FastAPI):
     db.init_schema()
     messaging.start_analyzed_consumer(handle_analyzed)
+    outbox.start_relay()
     yield
 
 
@@ -308,40 +309,38 @@ def create_poem(body: PoemCreate, request: Request, user: dict = Depends(current
         return token
 
     try:
-        conn = db.connect()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO puisi "
-                    "(user_id, judul, tgl_submit, isi, bait, kategori, keyword, gambar_file, "
-                    "status, versi, visibilitas) "
-                    "VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s, 'pending', 1, %s)",
-                    (user_id, judul, isi, bait, kategori, keyword, gambar_file, visibilitas),
-                )
-                poem_id = cur.lastrowid
-        finally:
-            conn.close()
+        # Puisi dan event poem.created commit bersama (transactional outbox):
+        # RabbitMQ mati tidak lagi menghilangkan event.
+        with db.transaction() as cur:
+            cur.execute(
+                "INSERT INTO puisi "
+                "(user_id, judul, tgl_submit, isi, bait, kategori, keyword, gambar_file, "
+                "status, versi, visibilitas) "
+                "VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s, 'pending', 1, %s)",
+                (user_id, judul, isi, bait, kategori, keyword, gambar_file, visibilitas),
+            )
+            poem_id = cur.lastrowid
+            outbox.add(
+                cur,
+                events.POEM_CREATED,
+                events.poem_created_payload(
+                    poem_id=poem_id,
+                    user_id=user_id,
+                    judul=judul,
+                    isi=isi,
+                    kategori=kategori,
+                    visibilitas=visibilitas,
+                ),
+                request.headers.get("X-Request-ID"),
+            )
     except Exception:
         _idem_release(token, user_id)
         raise
 
     result = {"ok": True, "id_puisi": poem_id, "status": "pending", "visibilitas": visibilitas}
-    # Respons disimpan sebelum publish/invalidasi: INSERT sudah commit (autocommit),
-    # jadi retry harus mendapat replay, bukan duplikat.
+    # Respons disimpan setelah commit, jadi retry mendapat replay, bukan duplikat.
     _idem_finish(token, user_id, 201, result)
-
-    messaging.publish(
-        events.POEM_CREATED,
-        events.poem_created_payload(
-            poem_id=poem_id,
-            user_id=user_id,
-            judul=judul,
-            isi=isi,
-            kategori=kategori,
-            visibilitas=visibilitas,
-        ),
-        request.headers.get("X-Request-ID"),
-    )
+    outbox.notify()
     _invalidate(user_id, poem_id)
     return result
 
@@ -427,17 +426,26 @@ def update_poem(
         visibilitas = fields.get("visibilitas") or events.parse_visibility(row.get("visibilitas"))
         _validate_fields(judul, isi, kategori, gambar_file)
 
-        conn = db.connect()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE puisi SET judul=%s, isi=%s, bait=%s, kategori=%s, keyword=%s, "
-                    "gambar_file=%s, visibilitas=%s, status='pending', versi=versi+1, "
-                    "updated_at=NOW() WHERE id=%s",
-                    (judul, isi, bait, kategori, keyword, gambar_file, visibilitas, poem_id),
-                )
-        finally:
-            conn.close()
+        with db.transaction() as cur:
+            cur.execute(
+                "UPDATE puisi SET judul=%s, isi=%s, bait=%s, kategori=%s, keyword=%s, "
+                "gambar_file=%s, visibilitas=%s, status='pending', versi=versi+1, "
+                "updated_at=NOW() WHERE id=%s",
+                (judul, isi, bait, kategori, keyword, gambar_file, visibilitas, poem_id),
+            )
+            outbox.add(
+                cur,
+                events.POEM_UPDATED,
+                events.poem_created_payload(
+                    poem_id=poem_id,
+                    user_id=user_id,
+                    judul=judul,
+                    isi=isi,
+                    kategori=kategori,
+                    visibilitas=visibilitas,
+                ),
+                request.headers.get("X-Request-ID"),
+            )
     except Exception:
         _idem_release(token, user_id)
         raise
@@ -445,22 +453,11 @@ def update_poem(
     result = {"ok": True, "id_puisi": poem_id, "status": "pending", "visibilitas": visibilitas}
     _idem_finish(token, user_id, 200, result)
 
-    # Hapus cache SEBELUM publish: begitu puisi dijadikan privat, gateway
+    # Hapus cache SEBELUM relay dibangunkan: begitu puisi dijadikan privat, gateway
     # (pemeriksaan akses wordcloud/kbbi) tidak boleh lagi membaca versi publik dari cache.
     _invalidate(user_id, poem_id)
-    messaging.publish(
-        events.POEM_UPDATED,
-        events.poem_created_payload(
-            poem_id=poem_id,
-            user_id=user_id,
-            judul=judul,
-            isi=isi,
-            kategori=kategori,
-            visibilitas=visibilitas,
-        ),
-        request.headers.get("X-Request-ID"),
-    )
-    return {"ok": True, "id_puisi": poem_id, "status": "pending", "visibilitas": visibilitas}
+    outbox.notify()
+    return result
 
 
 @app.delete("/api/poems/{poem_id}")
@@ -477,24 +474,21 @@ def delete_poem(poem_id: int, request: Request, user: dict = Depends(current_use
         if row["user_id"] != user_id:
             raise HTTPException(status_code=403, detail="Bukan pemilik puisi")
 
-        conn = db.connect()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM puisi_tag WHERE puisi_id = %s", (poem_id,))
-                cur.execute("DELETE FROM puisi WHERE id = %s", (poem_id,))
-        finally:
-            conn.close()
+        with db.transaction() as cur:
+            cur.execute("DELETE FROM puisi_tag WHERE puisi_id = %s", (poem_id,))
+            cur.execute("DELETE FROM puisi WHERE id = %s", (poem_id,))
+            outbox.add(
+                cur,
+                events.POEM_DELETED,
+                events.poem_deleted_payload(poem_id=poem_id),
+                request.headers.get("X-Request-ID"),
+            )
     except Exception:
         _idem_release(token, user_id)
         raise
 
     result = {"ok": True, "message": "Puisi dihapus"}
     _idem_finish(token, user_id, 200, result)
-
-    messaging.publish(
-        events.POEM_DELETED,
-        events.poem_deleted_payload(poem_id=poem_id),
-        request.headers.get("X-Request-ID"),
-    )
+    outbox.notify()
     _invalidate(user_id, poem_id)
     return result

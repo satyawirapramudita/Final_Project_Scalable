@@ -7,6 +7,7 @@ falsify, sehingga seluruh endpoint dapat diuji tanpa container.
 
 from __future__ import annotations
 
+import copy
 import os
 import sys
 from pathlib import Path
@@ -79,6 +80,33 @@ class FakeCursor:
             self._store["tag"] = [t for t in self._store["tag"] if t["puisi_id"] != params[0]]
         elif q.startswith("DELETE FROM puisi"):
             self._store["puisi"] = [r for r in self._store["puisi"] if r["id"] != params[0]]
+        elif q.startswith("SET TRANSACTION ISOLATION LEVEL"):
+            self._store["isolation"].append(q.rsplit("LEVEL ", 1)[1])
+        elif q.startswith("INSERT INTO outbox"):
+            self._store["outbox"].append(
+                {
+                    "id": len(self._store["outbox"]) + 1,
+                    "event_id": params[0],
+                    "routing_key": params[1],
+                    "envelope": params[2],
+                    "published_at": None,
+                    "attempts": 0,
+                    "last_error": None,
+                }
+            )
+        elif q.startswith("SELECT id, event_id, routing_key, envelope FROM outbox"):
+            assert "FOR UPDATE SKIP LOCKED" in q
+            pending = [r for r in self._store["outbox"] if r["published_at"] is None]
+            self._rows = [dict(r) for r in pending[: params[0]]]
+        elif q.startswith("UPDATE outbox SET published_at"):
+            for r in self._store["outbox"]:
+                if r["id"] in params:
+                    r["published_at"] = "now"
+        elif q.startswith("UPDATE outbox SET attempts"):
+            for r in self._store["outbox"]:
+                if r["id"] == params[1]:
+                    r["attempts"] += 1
+                    r["last_error"] = params[0]
         else:
             raise AssertionError(f"Query tidak dikenal stub: {q}")
 
@@ -96,11 +124,30 @@ class FakeCursor:
 
 
 class FakeConnection:
+    """Meniru transaksi: begin() memotret tabel, rollback() mengembalikannya."""
+
+    TABLES = ("puisi", "tag", "outbox")
+
     def __init__(self, store) -> None:
         self._store = store
+        self._snapshot: dict | None = None
 
     def cursor(self, *args, **kwargs) -> FakeCursor:
         return FakeCursor(self._store)
+
+    def begin(self) -> None:
+        self._snapshot = {t: copy.deepcopy(self._store[t]) for t in self.TABLES}
+        self._store["tx"].append("begin")
+
+    def commit(self) -> None:
+        self._snapshot = None
+        self._store["tx"].append("commit")
+
+    def rollback(self) -> None:
+        if self._snapshot is not None:
+            self._store.update(self._snapshot)
+            self._snapshot = None
+        self._store["tx"].append("rollback")
 
     def close(self) -> None:
         pass
@@ -136,7 +183,7 @@ class FakeRedis:
 
 @pytest.fixture
 def store() -> dict:
-    return {"puisi": [], "tag": []}
+    return {"puisi": [], "tag": [], "outbox": [], "tx": [], "isolation": []}
 
 
 @pytest.fixture
@@ -162,11 +209,10 @@ def fake_redis(monkeypatch) -> FakeRedis:
 
 
 @pytest.fixture(autouse=True)
-def fake_publish(monkeypatch):
-    """Publish RabbitMQ tidak boleh menyentuh jaringan saat uji."""
-    monkeypatch.setattr(
-        "services.poem.app.messaging.publish", lambda *a, **k: None
-    )
+def no_relay(monkeypatch):
+    """Relay outbox (thread RabbitMQ) tidak boleh berjalan saat uji; event
+    cukup diperiksa di tabel outbox stub, relay diuji langsung lewat relay_once."""
+    monkeypatch.setattr("services.poem.app.outbox.start_relay", lambda: None)
 
 
 @pytest.fixture

@@ -39,3 +39,9 @@ CACHE_TTL_LIST = _int("CACHE_TTL_LIST", 60)
 
 # Berapa lama Idempotency-Key diingat (24 jam, konvensi industri).
 IDEMPOTENCY_TTL = _int("IDEMPOTENCY_TTL", 86_400)
+
+# Transactional outbox (app/outbox.py).
+OUTBOX_RELAY_ENABLED = os.getenv("OUTBOX_RELAY_ENABLED", "1").lower() not in ("0", "false", "no")
+OUTBOX_BATCH = _int("OUTBOX_BATCH", 50)
+OUTBOX_POLL_SECONDS = float(os.getenv("OUTBOX_POLL_SECONDS", "1") or 1)
+OUTBOX_RETENTION_HOURS = _int("OUTBOX_RETENTION_HOURS", 24)
