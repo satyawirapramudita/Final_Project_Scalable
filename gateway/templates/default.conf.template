@@ -40,7 +40,6 @@ server {
     set $wordcloud_svc http://wordcloud:8003;
     set $search_svc    http://search:8004;
     set $kbbi_svc      http://kbbi-linker:8005;
-    set $tts_svc       http://tts:8006;
 
     # Header korelasi untuk seluruh request (dipakai lintas layanan)
     proxy_http_version 1.1;
@@ -205,11 +204,6 @@ server {
         error_page 503 @err_503;
         error_page 504 @err_504;
         proxy_pass $kbbi_svc;
-    }
-
-    location ^~ /api/tts/ {
-        limit_req zone=api_limit burst=${API_BURST} nodelay;
-        proxy_pass $tts_svc;
     }
 
     # Path /api lain yang tidak dikenal: JSON 404, bukan index.html.

@@ -11,13 +11,8 @@ Broker: **RabbitMQ**, satu topic exchange `poem.events`. Setiap konsumen punya q
 |---|---|---|---|
 | `poem.created` | poem (Satya) | nlp.q (Satya), search.q (Anders) | `event_id, correlation_id, poem_id, user_id, judul, isi, kategori, visibilitas, occurred_at` |
 | `poem.updated` | poem (Satya) | nlp.q (Satya), search.q (Anders) | sama dengan `poem.created` |
-| `poem.deleted` | poem (Satya) | search.q (Anders), wordcloud.q (Lindra), kbbi.q (Dzaky) | `event_id, poem_id, occurred_at` |
-| `poem.analyzed` | nlp-worker (Satya) | poem.q (Satya), wordcloud.q (Lindra), kbbi.q (Dzaky), search.q (Anders) | `event_id, correlation_id, poem_id, tags[], kata_puitif[], terms[{term,count}], occurred_at` |
-
-`tts.q` **belum di-bind** (TTS ditunda). Antrean tanpa konsumen hanya menumpuk pesan dan memakan
-memori RabbitMQ saat uji beban; tambahkan `QUEUE_TTS` ke `BINDINGS` di `shared/events.py` begitu
-layanan tts punya konsumen. Broker yang sudah berjalan masih menyimpan antrean lama; hapus sekali dengan
-`docker compose exec rabbitmq rabbitmqctl delete_queue tts.q`.
+| `poem.deleted` | poem (Satya) | search.q (Anders), wordcloud.q (Lindra, Anders), kbbi.q (Dzaky) | `event_id, poem_id, occurred_at` |
+| `poem.analyzed` | nlp-worker (Satya) | poem.q (Satya), wordcloud.q (Lindra, Anders), kbbi.q (Dzaky), search.q (Anders) | `event_id, correlation_id, poem_id, tags[], kata_puitif[], terms[{term,count}], occurred_at` |
 
 ## Visibilitas puisi (`visibilitas`)
 

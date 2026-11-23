@@ -6,25 +6,32 @@ Transformasi dari monolit stateful [Monolithic-Stateful-AWS-Deployment](https://
 **Mata kuliah:** PACS262521 — Pengembangan Perangkat Lunak Scalable
 
 > Status: auth, poem, nlp-worker, wordcloud, search, kbbi-linker, gateway, dan observability sudah
-> berjalan end-to-end. TTS ditunda. Dataset KBBI tidak disertakan (lihat bagian "Data KBBI").
+> berjalan end-to-end. Dataset KBBI tidak disertakan (lihat bagian "Data KBBI").
 
-## Arsitektur target
+## Arsitektur
 
-Tujuh layanan di balik satu gerbang Nginx:
+Enam layanan di belakang satu gerbang Nginx:
 
-| Layanan | Peran | Pemilik |
+| Layanan | Tugas | Pemilik |
 |---|---|---|
-| `gateway` (Nginx) | Pintu masuk tunggal, static, rate limit, X-Request-ID | Anders |
-| `auth` | Register/login, terbitkan JWT | Ardi |
-| `poem` | CRUD puisi, publish event (transactional outbox), cache baca | Satya |
-| `nlp-worker` | Pipeline NLP → `poem.analyzed` | Satya |
-| `wordcloud` | Frekuensi istilah dominan | Lindra |
-| `search` | Indeks & pencarian | Anders |
-| `kbbi-linker` | Kata Puitif → bentuk baku dan definisi KBBI | Dzaky |
-| `tts` (opsional) | Puisi → audio | Anders — **ditunda** |
+| `gateway` (Nginx) | Pintu masuk tunggal: routing `/api/*` ke layanan, menyajikan frontend, rate limit per IP, `X-Request-ID`, pemeriksaan akses puisi privat (`auth_request`) untuk wordcloud/kbbi, dan micro-cache wordcloud/kbbi | Anders |
+| `auth` | Registrasi dan login, hashing password, penerbitan JWT (stateless, tanpa sesi di server) | Ardi |
+| `poem` | CRUD puisi, visibilitas publik/privat, idempotency key, cache baca, publish event lewat transactional outbox, menyimpan tag dari `poem.analyzed` | Satya |
+| `nlp-worker` | Analisis teks asinkron (tag, Kata Puitif, frekuensi istilah) lalu publish `poem.analyzed` | Satya |
+| `wordcloud` | Menyimpan dan menyajikan istilah dominan per puisi dari `poem.analyzed`, dengan cache Redis | Lindra, Anders |
+| `search` | Indeks pencarian (MySQL FULLTEXT) yang diperbarui dari event; pencarian kata, filter kategori/tag, visibilitas, dan cache hasil | Anders |
+| `kbbi-linker` | Mencocokkan Kata Puitif ke bentuk baku dan definisi KBBI (import dataset, lookup, cache) | Dzaky |
 
-Komunikasi: sinkron (HTTP) untuk login/baca/cari; asinkron (**RabbitMQ**) untuk NLP, word cloud, KBBI, TTS.
-Store: MySQL (database logis per layanan) + Redis (cache).
+Tugas lintas layanan:
+
+| Bagian | Isi | Pemilik |
+|---|---|---|
+| Kontrak event | `shared/events.py`, [`docs/event-contracts.md`](docs/event-contracts.md) | Satya |
+| Observability | Prometheus, Grafana (dashboard p95/p99), nginx-exporter, autoheal | Anders |
+| Deployment AWS & gambar puisi | EC2, S3, CloudFront, Lambda generator gambar ([`docs/deployment.md`](docs/deployment.md)) | Ardi |
+
+Komunikasi: sinkron (HTTP) untuk login, baca, dan cari; asinkron (**RabbitMQ**) untuk NLP, word cloud,
+KBBI, dan indeks pencarian. Store: MySQL (database terpisah per layanan) + Redis (cache).
 
 ## Struktur
 
@@ -35,10 +42,9 @@ Final_Project_Scalable/
 │   ├── auth/                #   Ardi
 │   ├── poem/                #   Satya
 │   ├── nlp-worker/          #   Satya
-│   ├── wordcloud/           #   Lindra
+│   ├── wordcloud/           #   Lindra, Anders
 │   ├── search/              #   Anders
 │   ├── kbbi-linker/         #   Dzaky
-│   ├── tts/                 #   Anders (ditunda)
 │   └── _template/           #   kerangka untuk layanan baru
 ├── frontend/                # HTML/CSS/JS (dari Tugas 1)
 ├── db/init.sql              # skema auth_db, poem_db, wordcloud_db, kbbi_db, search_db
@@ -81,18 +87,17 @@ membuat layanan macet; sekitar 1 menit kemudian autoheal me-restart-nya (`docker
    ```powershell
    "CREATE DATABASE IF NOT EXISTS kbbi_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE USER IF NOT EXISTS 'kbbi_user'@'%' IDENTIFIED BY 'ganti_kbbi_password'; GRANT ALL PRIVILEGES ON kbbi_db.* TO 'kbbi_user'@'%';" | docker compose exec -T mysql sh -c 'MYSQL_PWD=$MYSQL_ROOT_PASSWORD mysql -uroot'
    ```
-3. Hapus antrean lama tanpa konsumen: `docker compose exec rabbitmq rabbitmqctl delete_queue tts.q`
-4. `docker compose up -d --build --remove-orphans`
-5. Puisi lama belum punya word cloud / KBBI: `Get-Content scripts/reanalyze_poems.py | docker compose exec -T poem python -`
+3. `docker compose up -d --build --remove-orphans`
+4. Puisi lama belum punya word cloud / KBBI: `Get-Content scripts/reanalyze_poems.py | docker compose exec -T poem python -`
 
 Kolom `visibilitas` (puisi publik/privat) ditambahkan otomatis oleh layanan poem dan search saat
-start (`ALTER TABLE` bila belum ada); puisi lama menjadi publik. Cukup langkah 4 (`--build`).
+start (`ALTER TABLE` bila belum ada); puisi lama menjadi publik. Cukup langkah 3 (`--build`).
 
 ### Data KBBI
 
 Dataset KBBI tidak ada di repo (lisensi). Tanpa import, semua Kata Puitif tampil "tidak ditemukan".
 Cara import ada di [`services/kbbi-linker/README.md`](services/kbbi-linker/README.md); setelahnya jalankan
-`scripts/reanalyze_poems.py` (langkah 5 di atas) agar puisi lama ikut terhubung.
+`scripts/reanalyze_poems.py` (langkah 4 di atas) agar puisi lama ikut terhubung.
 
 ## Peta endpoint
 
@@ -105,7 +110,6 @@ Semua endpoint selain register/login butuh header `Authorization: Bearer <jwt>`.
 | `GET /api/wordcloud/{poem_id}` (akses diperiksa gateway) | wordcloud |
 | `GET /api/search?q=&kategori=&tag=&page=` (puisi publik + privat milik sendiri) | search |
 | `GET /api/kbbi/{poem_id}` (akses diperiksa gateway) | kbbi-linker |
-| `GET /api/tts/{poem_id}` | tts (ditunda) |
 
 **Visibilitas.** `POST`/`PUT /api/poems` menerima `"visibilitas": "public" | "private"` (default
 `public`). Puisi privat hanya terlihat oleh pemiliknya; pengguna lain mendapat 404 di poem, search,
@@ -175,6 +179,5 @@ Rencana & langkah deployment AWS ada di [`docs/deployment.md`](docs/deployment.m
 - [ ] Framework service HTTP: FastAPI (dipakai di skeleton ini) atau stdlib.
 - [ ] Mesin pencarian: MySQL FULLTEXT atau Meilisearch.
 - [ ] Pustaka NLP bahasa Indonesia.
-- [ ] TTS: AWS Polly / gTTS / tidak diimplementasikan.
 - [ ] Ukuran instance EC2 & anggaran AWS.
 - [ ] Fitur gambar puisi (Lambda) dipertahankan atau tidak.

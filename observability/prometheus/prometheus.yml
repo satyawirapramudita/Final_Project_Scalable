@@ -24,8 +24,6 @@ scrape_configs:
     dns_sd_configs: [{ names: [search], type: A, port: 8004, refresh_interval: 5s }]
   - job_name: kbbi-linker
     dns_sd_configs: [{ names: [kbbi-linker], type: A, port: 8005, refresh_interval: 5s }]
-  - job_name: tts
-    dns_sd_configs: [{ names: [tts], type: A, port: 8006, refresh_interval: 5s }]
   - job_name: nlp-worker
     dns_sd_configs: [{ names: [nlp-worker], type: A, port: 8100, refresh_interval: 5s }]
 

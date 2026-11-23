@@ -134,7 +134,7 @@ services:
       - edge
       - data
 
-  wordcloud: # Lindra
+  wordcloud: # Lindra, Anders
     build:
       context: .
       dockerfile: services/wordcloud/Dockerfile
@@ -245,21 +245,6 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-    networks:
-      - edge
-      - data
-
-  tts: # Anders — ditunda/opsional
-    build:
-      context: .
-      dockerfile: services/tts/Dockerfile
-    container_name: puisi-tts
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      <<: *common-env
-      SERVICE_NAME: tts
-      PORT: "8006"
     networks:
       - edge
       - data

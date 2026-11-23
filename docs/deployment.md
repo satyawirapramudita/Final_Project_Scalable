@@ -65,7 +65,7 @@ Browser
    ```bash
    aws s3 sync frontend/ s3://<NAMA_BUCKET>/ --delete
    ```
-6. Siapkan prefix untuk gambar puisi (`hasil-puisi/`), PNG word cloud, dan audio TTS.
+6. Siapkan prefix untuk gambar puisi (`hasil-puisi/`) dan PNG word cloud.
 
 ### 4.2 AWS Lambda (generator gambar puisi)
 
