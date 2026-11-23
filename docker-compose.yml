@@ -58,8 +58,12 @@ services:
     build:
       context: .
       dockerfile: services/auth/Dockerfile
-    container_name: puisi-auth
+    # Tanpa container_name: auth stateless (JWT), jadi bisa punya beberapa replika.
     restart: unless-stopped
+    # Replika default 2 (redundansi + bagi beban); ubah lewat AUTH_REPLICAS
+    # atau sementara: docker compose up -d --scale auth=N
+    deploy:
+      replicas: ${AUTH_REPLICAS:-2}
     labels:
       # dipantau layanan autoheal: restart otomatis bila health check gagal
       autoheal: "true"
@@ -91,8 +95,11 @@ services:
     build:
       context: .
       dockerfile: services/poem/Dockerfile
-    # Tanpa container_name agar bisa di-scale: docker compose up -d --scale poem=2
     restart: unless-stopped
+    # Replika default 2 (redundansi + bagi beban); ubah lewat POEM_REPLICAS
+    # atau sementara: docker compose up -d --scale poem=N
+    deploy:
+      replicas: ${POEM_REPLICAS:-2}
     labels:
       # dipantau layanan autoheal: restart otomatis bila health check gagal
       autoheal: "true"
@@ -128,8 +135,11 @@ services:
     build:
       context: .
       dockerfile: services/wordcloud/Dockerfile
-    # Tanpa container_name agar bisa di-scale: docker compose up -d --scale wordcloud=3
     restart: unless-stopped
+    # Replika default 2 (redundansi + bagi beban); ubah lewat WORDCLOUD_REPLICAS
+    # atau sementara: docker compose up -d --scale wordcloud=N
+    deploy:
+      replicas: ${WORDCLOUD_REPLICAS:-2}
     labels:
       # dipantau layanan autoheal: restart otomatis bila health check gagal
       autoheal: "true"
@@ -163,8 +173,11 @@ services:
     build:
       context: .
       dockerfile: services/search/Dockerfile
-    # Tanpa container_name agar bisa di-scale: docker compose up -d --scale search=3
     restart: unless-stopped
+    # Replika default 2 (redundansi + bagi beban); ubah lewat SEARCH_REPLICAS
+    # atau sementara: docker compose up -d --scale search=N
+    deploy:
+      replicas: ${SEARCH_REPLICAS:-2}
     labels:
       # dipantau layanan autoheal: restart otomatis bila health check gagal
       autoheal: "true"
@@ -199,6 +212,10 @@ services:
       context: .
       dockerfile: services/kbbi-linker/Dockerfile
     restart: unless-stopped
+    # Replika default 2 (redundansi + bagi beban); ubah lewat KBBI_REPLICAS
+    # atau sementara: docker compose up -d --scale kbbi-linker=N
+    deploy:
+      replicas: ${KBBI_REPLICAS:-2}
     labels:
       # dipantau layanan autoheal: restart otomatis bila health check gagal
       autoheal: "true"
@@ -249,8 +266,11 @@ services:
     build:
       context: .
       dockerfile: services/nlp-worker/Dockerfile
-    # Tanpa container_name agar bisa di-scale: docker compose up -d --scale nlp-worker=3
     restart: unless-stopped
+    # Replika default 2 (redundansi + bagi beban); ubah lewat NLP_WORKER_REPLICAS
+    # atau sementara: docker compose up -d --scale nlp-worker=N
+    deploy:
+      replicas: ${NLP_WORKER_REPLICAS:-2}
     labels:
       # dipantau layanan autoheal: restart otomatis bila health check gagal
       autoheal: "true"
