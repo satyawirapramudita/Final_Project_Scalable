@@ -21,6 +21,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 from shared.metrics import REQUEST_SECONDS, route_path
 
 from . import cache, config, consumer, db
+from .breaker import BreakerOpen, CircuitBreaker
 from .engine import engine
 from .security import current_user
 from .textutil import clean_tag, make_snippet, match_expression, split_tags, tokenize
@@ -34,6 +35,35 @@ REQUEST_COUNT = Counter(
     ["service", "method", "path", "status"],
 )
 CACHE_RESULT = Counter("search_cache_total", "Hasil lookup cache pencarian", ["result"])
+
+
+def _mysql_is_sick(exc: BaseException) -> bool:
+    """Hanya kegagalan yang menandakan MySQL sakit yang membuka breaker.
+    PoolTimeout (replika ini sendiri sedang ramai) dan bug SQL (ProgrammingError)
+    tidak dihitung, agar breaker tidak menolak request saat MySQL sebenarnya sehat."""
+    if isinstance(exc, db.PoolTimeout):
+        return False
+    return isinstance(
+        exc, (db.DBDown, pymysql.err.OperationalError, pymysql.err.InterfaceError, OSError)
+    )
+
+
+search_breaker = CircuitBreaker(
+    "search_mysql",
+    failure_threshold=config.BREAKER_FAILURES,
+    reset_timeout=config.BREAKER_RESET_SECONDS,
+    counts_as_failure=_mysql_is_sick,
+)
+
+
+def _stale_or_503(digest: str, detail: str) -> dict:
+    """Degradasi halus: saat MySQL tidak bisa dipakai, sajikan salinan cadangan
+    (mungkin usang) bila ada; kalau tidak, 503."""
+    stale = cache.lookup_stale(digest)
+    if stale is not None:
+        CACHE_RESULT.labels("stale").inc()
+        return {**stale, "cached": True, "stale": True}
+    raise HTTPException(status_code=503, detail=detail)
 
 
 @asynccontextmanager
@@ -109,20 +139,25 @@ def search(
 
     try:
         # limit + 1 baris cukup untuk tahu ada halaman berikutnya tanpa COUNT(*) kedua.
-        rows = engine.search(
-            match=match_expression(tokens) if tokens else None,
-            kategori=kategori,
-            tag=tag,
-            viewer_id=viewer_id,
-            limit=limit + 1,
-            offset=(page - 1) * limit,
+        rows = search_breaker.call(
+            lambda: engine.search(
+                match=match_expression(tokens) if tokens else None,
+                kategori=kategori,
+                tag=tag,
+                viewer_id=viewer_id,
+                limit=limit + 1,
+                offset=(page - 1) * limit,
+            )
         )
+    except BreakerOpen:
+        # MySQL dianggap sakit: tidak dicoba sama sekali, jawab seketika
+        return _stale_or_503(digest, "Pencarian sementara tidak tersedia, coba lagi sebentar")
     except db.Unavailable:
         # kolam koneksi penuh, atau database tidak terjangkau: gagal cepat
-        raise HTTPException(status_code=503, detail="Pencarian sedang sibuk, coba lagi sebentar")
+        return _stale_or_503(digest, "Pencarian sedang sibuk, coba lagi sebentar")
     except pymysql.MySQLError:
         log.exception("Query pencarian gagal")
-        raise HTTPException(status_code=503, detail="Pencarian tidak tersedia")
+        return _stale_or_503(digest, "Pencarian tidak tersedia")
 
     has_more = len(rows) > limit
     result = {

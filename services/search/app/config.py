@@ -38,6 +38,14 @@ REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = _int("REDIS_PORT", 6379)
 
 CACHE_TTL_SEARCH = _int("CACHE_TTL_SEARCH", 45)
+# Salinan cadangan hasil pencarian, tanpa versi, dipakai HANYA saat MySQL tidak
+# bisa dipakai (breaker terbuka). Hasilnya bisa usang hingga selama TTL ini.
+CACHE_TTL_STALE = _int("CACHE_TTL_STALE", 300)
+
+# Circuit breaker query pencarian: terbuka setelah N kegagalan berturut-turut,
+# lalu menolak request selama RESET detik sebelum mencoba satu request lagi.
+BREAKER_FAILURES = _int("SEARCH_BREAKER_FAILURES", 5)
+BREAKER_RESET_SECONDS = _int("SEARCH_BREAKER_RESET", 10)
 # Invalidasi cache digabung: paling cepat sekali per interval ini (detik). Puisi baru
 # muncul di pencarian paling lambat selama interval ini; semburan penulisan hanya
 # membatalkan cache sekali alih-alih ratusan kali.

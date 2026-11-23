@@ -106,18 +106,38 @@ def lookup(digest: str) -> tuple[dict | None, str]:
         return None, "0"
 
 
+def _stale_key(digest: str) -> str:
+    return f"search:s:{digest}"
+
+
 def store(digest: str, version: str, value: dict) -> None:
+    """Simpan hasil di versi aktif, plus salinan cadangan tanpa versi yang
+    bertahan lebih lama (CACHE_TTL_STALE) untuk degradasi saat MySQL sakit."""
     client = _get_client()
     if client is None:
         return
     try:
-        client.set(
-            _result_key(version, digest),
-            json.dumps(value, default=str),
-            ex=config.CACHE_TTL_SEARCH,
-        )
+        raw = json.dumps(value, default=str)
+        pipe = client.pipeline(transaction=False)
+        pipe.set(_result_key(version, digest), raw, ex=config.CACHE_TTL_SEARCH)
+        pipe.set(_stale_key(digest), raw, ex=config.CACHE_TTL_STALE)
+        pipe.execute()
     except Exception:  # noqa: BLE001
         _mark_down()
+
+
+def lookup_stale(digest: str) -> dict | None:
+    """Salinan cadangan, mungkin usang. Kunci tetap memuat viewer_id (lihat main),
+    jadi puisi privat seseorang tidak pernah tersaji ke pengguna lain."""
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        raw = client.get(_stale_key(digest))
+        return json.loads(raw) if raw else None
+    except Exception:  # noqa: BLE001
+        _mark_down()
+        return None
 
 
 def bump() -> None:
