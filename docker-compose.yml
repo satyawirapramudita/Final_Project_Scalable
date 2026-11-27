@@ -10,7 +10,12 @@ x-common-env: &common-env
   JWT_SECRET: ${JWT_SECRET}
   JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
   JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-1440}
-  RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+  # Klaster RabbitMQ 3 node: klien mencoba node dalam urutan acak dan pindah
+  # ke node lain saat satu mati (shared/rabbit.py). Sengaja variabel baru
+  # (RABBITMQ_HOSTS), agar RABBITMQ_HOST=rabbitmq di .env lama tidak menimpanya.
+  RABBITMQ_HOST: ${RABBITMQ_HOSTS:-rabbit-1,rabbit-2,rabbit-3}
+  # Quorum queue: pesan direplikasi ke mayoritas node. Harus sama di semua layanan.
+  RABBITMQ_QUEUE_TYPE: ${RABBITMQ_QUEUE_TYPE:-quorum}
   RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
   RABBITMQ_USER: ${RABBITMQ_USER:-puisi}
   RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
@@ -25,16 +30,64 @@ x-logging: &loglimit
     max-size: "10m"
     max-file: "3"
 
+# Batas memori dan jumlah proses per container. Tujuannya isolasi: container
+# yang bocor memori atau fork tanpa henti dibunuh/di-restart sendiri (OOM di
+# dalam cgroup-nya), bukan menghabiskan RAM host dan menjatuhkan container lain.
+# Ini batas atas, bukan reservasi. Terukur saat idle (docker stats, 27 Nov 2026):
+# layanan Python 45-65 MiB/7-8 proses, gateway 17 MiB, RabbitMQ ~216 MiB/106
+# proses (16 CPU), MySQL ~470 MiB/53 proses. Batas memberi ruang ~5x untuk uji beban.
+x-limits-gateway: &limits-gateway
+  mem_limit: 256m
+  pids_limit: 128
+x-limits-svc: &limits-svc
+  mem_limit: 384m
+  pids_limit: 256
+
+# Konfigurasi bersama tiga node RabbitMQ (rabbit-1, rabbit-2, rabbit-3).
+x-rabbit: &rabbit
+  logging: *loglimit
+  image: rabbitmq:3.13-management-alpine
+  restart: unless-stopped
+  env_file: .env
+  environment:
+    RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-puisi}
+    RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    # Ketiga node (dan CLI rabbitmqctl) wajib memakai cookie yang sama.
+    # Ganti di .env untuk produksi (deploy/gen-secrets.sh membuatkannya).
+    RABBITMQ_ERLANG_COOKIE: ${RABBITMQ_ERLANG_COOKIE:-puisi-dev-cookie-ganti-di-env}
+  # vm_memory_high_watermark di 20-cluster.conf (512 MiB) harus di bawah batas ini,
+  # agar RabbitMQ menahan publisher (flow control) sebelum dibunuh OOM.
+  mem_limit: 1g
+  pids_limit: 512
+  healthcheck:
+    # check_running: aplikasi RabbitMQ benar-benar berjalan (bukan hanya VM Erlang).
+    test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+    interval: 10s
+    timeout: 10s
+    retries: 12
+    start_period: 30s
+  networks:
+    data:
+      aliases: [rabbitmq]
+
+# Konfigurasi bersama dua instans gateway (gateway-a = `gateway`, dan gateway-b).
+x-gateway: &gateway
+  logging: *loglimit
+  image: nginx:1.27-alpine
+  restart: unless-stopped
+  <<: *limits-gateway
+  labels:
+    # dipantau layanan autoheal: restart otomatis bila health check gagal
+    autoheal: "true"
+
 services:
-  # ── Gerbang tunggal (Anders) ──────────────────────────────
-  gateway:
-    logging: *loglimit
-    image: nginx:1.27-alpine
+  # ── Gateway (Anders): dua instans, gateway-a (`gateway`) dan gateway-b ──
+  # Keduanya identik. CloudFront origin group mengarah ke gateway-a (port 80)
+  # dan pindah ke gateway-b (port 81) bila gateway-a mengembalikan 5xx atau
+  # tidak tersambung. Lokal: gateway-a di :8080, gateway-b di :8081.
+  gateway: &gateway-a
+    <<: *gateway
     container_name: puisi-gateway
-    restart: unless-stopped
-    labels:
-      # dipantau layanan autoheal: restart otomatis bila health check gagal
-      autoheal: "true"
     ports:
       - "${GATEWAY_PORT:-8080}:80"
     environment:
@@ -76,9 +129,19 @@ services:
     networks:
       - edge
 
+  # gateway-b: salinan identik gateway-a (image, konfigurasi, environment sama).
+  # Cache mikro dan rate limit dihitung per instans. Di EC2 dibuka di port 81
+  # (docker-compose.prod.yml) sebagai origin kedua CloudFront.
+  gateway-b:
+    <<: *gateway-a
+    container_name: puisi-gateway-b
+    ports:
+      - "${GATEWAY_B_PORT:-8081}:80"
+
   # ── Layanan HTTP (sinkron) ────────────────────────────────
   auth: # Ardi
     logging: *loglimit
+    <<: *limits-svc
     build:
       context: .
       dockerfile: services/auth/Dockerfile
@@ -117,6 +180,7 @@ services:
 
   poem: # Satya
     logging: *loglimit
+    <<: *limits-svc
     build:
       context: .
       dockerfile: services/poem/Dockerfile
@@ -145,7 +209,11 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      rabbitmq:
+      rabbit-1:
+        condition: service_healthy
+      rabbit-2:
+        condition: service_healthy
+      rabbit-3:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8002/health').status==200 else 1)"]
@@ -158,6 +226,7 @@ services:
 
   wordcloud: # Lindra, Anders
     logging: *loglimit
+    <<: *limits-svc
     build:
       context: .
       dockerfile: services/wordcloud/Dockerfile
@@ -182,7 +251,11 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      rabbitmq:
+      rabbit-1:
+        condition: service_healthy
+      rabbit-2:
+        condition: service_healthy
+      rabbit-3:
         condition: service_healthy
       redis:
         condition: service_started
@@ -197,6 +270,8 @@ services:
 
   search: # Anders
     logging: *loglimit
+    mem_limit: 768m   # sampai 4 worker uvicorn (SEARCH_WORKERS)
+    pids_limit: 256
     build:
       context: .
       dockerfile: services/search/Dockerfile
@@ -225,7 +300,11 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      rabbitmq:
+      rabbit-1:
+        condition: service_healthy
+      rabbit-2:
+        condition: service_healthy
+      rabbit-3:
         condition: service_healthy
       redis:
         condition: service_started
@@ -240,6 +319,7 @@ services:
 
   kbbi-linker: # Dzaky
     logging: *loglimit
+    <<: *limits-svc
     build:
       context: .
       dockerfile: services/kbbi-linker/Dockerfile
@@ -265,7 +345,11 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      rabbitmq:
+      rabbit-1:
+        condition: service_healthy
+      rabbit-2:
+        condition: service_healthy
+      rabbit-3:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -281,6 +365,7 @@ services:
   # ── Worker asinkron (tanpa API publik) ────────────────────
   nlp-worker: # Satya
     logging: *loglimit
+    <<: *limits-svc
     build:
       context: .
       dockerfile: services/nlp-worker/Dockerfile
@@ -298,7 +383,11 @@ services:
       SERVICE_NAME: nlp-worker
       PORT: "8100"
     depends_on:
-      rabbitmq:
+      rabbit-1:
+        condition: service_healthy
+      rabbit-2:
+        condition: service_healthy
+      rabbit-3:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8100/health').status==200 else 1)"]
@@ -313,6 +402,9 @@ services:
     logging: *loglimit
     image: mysql:8
     container_name: puisi-mysql
+    # InnoDB buffer pool default 128 MiB; ~470 MiB idle, koneksi pool semua replika butuh thread.
+    mem_limit: 1536m
+    pids_limit: 1024
     restart: unless-stopped
     env_file: .env
     environment:
@@ -336,6 +428,8 @@ services:
     logging: *loglimit
     image: redis:7-alpine
     container_name: puisi-redis
+    mem_limit: 256m
+    pids_limit: 64
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
@@ -348,29 +442,45 @@ services:
     networks:
       - data
 
-  rabbitmq:
-    logging: *loglimit
-    image: rabbitmq:3.13-management-alpine
-    container_name: puisi-rabbitmq
-    restart: unless-stopped
-    env_file: .env
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-puisi}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+  # ── Klaster RabbitMQ 3 node ──
+  # Node saling menemukan lewat daftar statis (rabbitmq/20-cluster.conf) dan
+  # berbagi Erlang cookie. Antrean bertipe quorum (RABBITMQ_QUEUE_TYPE) sehingga
+  # setiap pesan direplikasi ke mayoritas node: klaster tetap jalan dan tidak
+  # kehilangan pesan saat SATU node mati. Ketiganya ada di satu host Docker,
+  # jadi ini melindungi dari kegagalan node, bukan kegagalan host.
+  # Alias jaringan `rabbitmq` di ketiga node: skrip/klien lama yang memakai
+  # host "rabbitmq" tetap jalan (DNS Docker mengembalikan ketiga IP).
+  rabbit-1:
+    <<: *rabbit
+    hostname: rabbit-1
+    container_name: puisi-rabbit-1
     ports:
       # Management UI hanya dari host (dev/SSH tunnel). Jangan pernah dibuka ke
       # internet: di EC2 akses lewat `ssh -L 15672:127.0.0.1:15672`.
+      # Satu UI cukup: UI node mana pun menampilkan seluruh klaster.
       - "127.0.0.1:15672:15672"
     volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
+      - rabbit1_data:/var/lib/rabbitmq
       - ./observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro,z
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 10s
-      retries: 12
-    networks:
-      - data
+      - ./rabbitmq/20-cluster.conf:/etc/rabbitmq/conf.d/20-cluster.conf:ro,z
+
+  rabbit-2:
+    <<: *rabbit
+    hostname: rabbit-2
+    container_name: puisi-rabbit-2
+    volumes:
+      - rabbit2_data:/var/lib/rabbitmq
+      - ./observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro,z
+      - ./rabbitmq/20-cluster.conf:/etc/rabbitmq/conf.d/20-cluster.conf:ro,z
+
+  rabbit-3:
+    <<: *rabbit
+    hostname: rabbit-3
+    container_name: puisi-rabbit-3
+    volumes:
+      - rabbit3_data:/var/lib/rabbitmq
+      - ./observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro,z
+      - ./rabbitmq/20-cluster.conf:/etc/rabbitmq/conf.d/20-cluster.conf:ro,z
 
   # ── Observability (Anders) ────────────────────────────────
   # Port dibind ke 127.0.0.1 saja. Di EC2 akses lewat SSH tunnel:
@@ -379,6 +489,8 @@ services:
     logging: *loglimit
     image: prom/prometheus:v2.55.1
     container_name: puisi-prometheus
+    mem_limit: 512m
+    pids_limit: 128
     restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -388,6 +500,7 @@ services:
       - "127.0.0.1:9090:9090"
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
+      - ./observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro,z
       - prometheus_data:/prometheus
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/healthy"]
@@ -402,6 +515,8 @@ services:
     logging: *loglimit
     image: nginx/nginx-prometheus-exporter:1.3.0
     container_name: puisi-nginx-exporter
+    mem_limit: 64m
+    pids_limit: 64
     restart: unless-stopped
     command:
       - --nginx.scrape-uri=http://gateway:8081/stub_status
@@ -411,10 +526,27 @@ services:
     networks:
       - edge
 
+  nginx-exporter-b:
+    logging: *loglimit
+    image: nginx/nginx-prometheus-exporter:1.3.0
+    container_name: puisi-nginx-exporter-b
+    mem_limit: 64m
+    pids_limit: 64
+    restart: unless-stopped
+    command:
+      - --nginx.scrape-uri=http://gateway-b:8081/stub_status
+    depends_on:
+      gateway-b:
+        condition: service_healthy
+    networks:
+      - edge
+
   grafana:
     logging: *loglimit
     image: grafana/grafana:11.3.1
     container_name: puisi-grafana
+    mem_limit: 256m
+    pids_limit: 128
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: admin
@@ -448,6 +580,8 @@ services:
     # (amd64, build upstream Dockerfile saat ini) demi supply chain.
     image: willfarrell/autoheal@sha256:47cac8b9c7cdf05114065d453fecc4e1c0eeab1dc06a635ea2764b6302e206ad
     container_name: puisi-autoheal
+    mem_limit: 64m
+    pids_limit: 32
     restart: unless-stopped
     environment:
       AUTOHEAL_CONTAINER_LABEL: autoheal
@@ -473,6 +607,8 @@ networks:
 volumes:
   mysql_data:
   redis_data:
-  rabbitmq_data:
+  rabbit1_data:
+  rabbit2_data:
+  rabbit3_data:
   prometheus_data:
   grafana_data:

@@ -9,6 +9,11 @@ global:
   scrape_interval: 5s
   evaluation_interval: 15s
 
+# Alert rule (DLQ, outbox, node RabbitMQ, breaker, error 5xx). Status alert
+# terlihat di Prometheus → Alerts (http://localhost:9090/alerts).
+rule_files:
+  - /etc/prometheus/alerts.yml
+
 scrape_configs:
   - job_name: prometheus
     static_configs:
@@ -28,19 +33,25 @@ scrape_configs:
     dns_sd_configs: [{ names: [nlp-worker], type: A, port: 8100, refresh_interval: 5s }]
 
   # Gateway: stub_status nginx lewat exporter (jumlah request, koneksi aktif).
+  # Satu exporter per instans gateway (gateway-a dan gateway-b).
   - job_name: gateway
     static_configs:
       - targets: ["nginx-exporter:9113"]
+        labels: { gateway: gateway-a }
+      - targets: ["nginx-exporter-b:9113"]
+        labels: { gateway: gateway-b }
 
-  # RabbitMQ: metrik agregat (plugin rabbitmq_prometheus, port 15692).
+  # RabbitMQ: metrik agregat per node (plugin rabbitmq_prometheus, port 15692).
   - job_name: rabbitmq
     static_configs:
-      - targets: ["rabbitmq:15692"]
+      - targets: ["rabbit-1:15692", "rabbit-2:15692", "rabbit-3:15692"]
 
   # RabbitMQ per-queue: kedalaman, unacked, jumlah consumer (termasuk *.dlq).
+  # Quorum queue dilaporkan oleh node leader-nya, jadi ketiga node di-scrape;
+  # gunakan max by (queue) agar tidak dobel bila lebih dari satu node melapor.
   - job_name: rabbitmq-queues
     metrics_path: /metrics/detailed
     params:
       family: [queue_coarse_metrics, queue_consumer_count]
     static_configs:
-      - targets: ["rabbitmq:15692"]
+      - targets: ["rabbit-1:15692", "rabbit-2:15692", "rabbit-3:15692"]

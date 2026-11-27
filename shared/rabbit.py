@@ -2,12 +2,23 @@
 
 Menyediakan koneksi dengan retry, deklarasi topologi (exchange, queue,
 DLQ, binding), publisher thread-safe, dan consumer dengan retry + DLQ.
+
+Klaster: `host` boleh berisi beberapa node dipisah koma
+("rabbit-1,rabbit-2,rabbit-3"). Setiap koneksi mencoba node dalam urutan acak,
+sehingga klien tersebar di semua node dan pindah ke node lain saat satu mati.
+
+Tipe antrean diatur RABBITMQ_QUEUE_TYPE (default "classic"; docker-compose.yml
+memakai "quorum"). Quorum queue mereplikasi pesan ke mayoritas node klaster.
+Tipe antrean tidak bisa diubah setelah antrean dibuat: semua layanan dalam satu
+broker harus memakai nilai yang sama, dan berpindah tipe butuh broker baru.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
+import random
 import threading
 import time
 from typing import Callable
@@ -19,17 +30,51 @@ from shared import backoff, events
 log = logging.getLogger("shared.rabbit")
 
 
-def _params(host: str, port: int, user: str, password: str, vhost: str) -> pika.ConnectionParameters:
-    return pika.ConnectionParameters(
-        host=host,
-        port=port,
-        virtual_host=vhost or "/",
-        credentials=pika.PlainCredentials(user, password),
-        heartbeat=60,
-        blocked_connection_timeout=30,
-        connection_attempts=3,
-        retry_delay=2,
-    )
+def hosts(host: str) -> list[str]:
+    """Pecah "a,b,c" menjadi daftar host (spasi dan entri kosong diabaikan)."""
+    return [h.strip() for h in host.split(",") if h.strip()]
+
+
+def queue_type() -> str:
+    value = os.getenv("RABBITMQ_QUEUE_TYPE", "classic").strip().lower()
+    if value not in ("classic", "quorum"):
+        raise ValueError(f"RABBITMQ_QUEUE_TYPE tidak dikenal: {value!r}")
+    return value
+
+
+def queue_arguments(dead_letter_routing_key: str | None = None) -> dict:
+    """Argumen deklarasi antrean (tipe antrean + dead-letter bila ada)."""
+    args: dict = {}
+    if queue_type() == "quorum":
+        args["x-queue-type"] = "quorum"
+    if dead_letter_routing_key is not None:
+        args["x-dead-letter-exchange"] = events.DLX
+        args["x-dead-letter-routing-key"] = dead_letter_routing_key
+    return args
+
+
+def _params(host: str, port: int, user: str, password: str, vhost: str) -> list[pika.ConnectionParameters]:
+    nodes = hosts(host)
+    if not nodes:
+        raise ValueError("RABBITMQ_HOST kosong")
+    random.shuffle(nodes)
+    # Satu node: pika sendiri mengulang 3x. Banyak node: satu percobaan per node,
+    # agar node yang mati tidak menahan ~6 dtk sebelum node berikutnya dicoba.
+    attempts = 3 if len(nodes) == 1 else 1
+    return [
+        pika.ConnectionParameters(
+            host=node,
+            port=port,
+            virtual_host=vhost or "/",
+            credentials=pika.PlainCredentials(user, password),
+            heartbeat=60,
+            blocked_connection_timeout=30,
+            connection_attempts=attempts,
+            retry_delay=2,
+            socket_timeout=5,
+        )
+        for node in nodes
+    ]
 
 
 def connect(
@@ -62,16 +107,13 @@ def declare_topology(channel: pika.adapters.blocking_connection.BlockingChannel)
         channel.queue_declare(
             queue=queue,
             durable=True,
-            arguments={
-                "x-dead-letter-exchange": events.DLX,
-                "x-dead-letter-routing-key": f"{queue}.dlq",
-            },
+            arguments=queue_arguments(dead_letter_routing_key=f"{queue}.dlq"),
         )
         for key in keys:
             channel.queue_bind(exchange=events.EXCHANGE, queue=queue, routing_key=key)
 
         dlq = f"{queue}.dlq"
-        channel.queue_declare(queue=dlq, durable=True)
+        channel.queue_declare(queue=dlq, durable=True, arguments=queue_arguments())
         channel.queue_bind(exchange=events.DLX, queue=dlq, routing_key=dlq)
 
 
