@@ -27,12 +27,19 @@ def _get_publisher() -> Publisher:
     return _publisher
 
 
-def publish(event_name: str, payload: dict, correlation_id: str | None = None) -> str | None:
+def publish(event_name: str, payload: dict, correlation_id: str | None = None) -> str:
+    """Publish dengan publisher confirms. Kegagalan SENGAJA dilempar.
+
+    Dulu exception ditelan dan pesan asal tetap di-ack, sehingga hasil analisis
+    hilang diam-diam saat RabbitMQ bermasalah. Sekarang exception naik ke
+    start_consumer: pesan asal diulang dengan backoff, lalu masuk DLQ bila
+    tetap gagal. Analisis ulang aman karena konsumen poem.analyzed idempoten.
+    """
     try:
         return _get_publisher().publish(event_name, payload, correlation_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("Gagal publish %s", event_name)
-        return None
+        raise
 
 
 def start_created_consumer(handler: Callable[[dict], None]) -> None:

@@ -1,0 +1,95 @@
+# Alert rule Prometheus (Hands-On 3, titik kritis 2-5).
+#
+# Tidak ada Alertmanager: alert terlihat di http://localhost:9090/alerts
+# (status pending → firing) dan bisa dipakai panel Grafana lewat ALERTS{}.
+# Untuk notifikasi (email/Slack/Telegram), tambahkan Alertmanager dan blok
+# `alerting:` di prometheus.yml.
+
+groups:
+  - name: pesan
+    rules:
+      # Pesan masuk DLQ = event gagal diproses setelah semua retry.
+      # Periksa dan kirim ulang dengan scripts/replay_dlq.py.
+      - alert: DeadLetterQueueTidakKosong
+        expr: max by (queue) (rabbitmq_detailed_queue_messages{queue=~".*\\.dlq"}) > 0
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "DLQ {{ $labels.queue }} berisi {{ $value }} pesan"
+          description: "Event gagal diproses setelah retry. Periksa: python scripts/replay_dlq.py --queue <antrean> --list"
+
+      # Outbox menumpuk = relay poem tidak bisa mengirim ke RabbitMQ.
+      - alert: OutboxMenumpuk
+        expr: max(poem_outbox_oldest_pending_seconds) > 60
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Event outbox tertua belum terkirim selama {{ $value | humanizeDuration }}"
+          description: "Relay outbox poem gagal publish (RabbitMQ mati atau tidak terjangkau). Event akan terkirim otomatis setelah pulih."
+
+      # Antrean kerja menumpuk (konsumen mati atau terlalu lambat).
+      - alert: AntreanMenumpuk
+        expr: max by (queue) (rabbitmq_detailed_queue_messages{queue!~".*\\.dlq"}) > 500
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Antrean {{ $labels.queue }} berisi {{ $value }} pesan selama 5 menit"
+
+      - alert: AntreanTanpaKonsumen
+        expr: max by (queue) (rabbitmq_detailed_queue_consumers{queue!~".*\\.dlq"}) == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Antrean {{ $labels.queue }} tidak punya konsumen"
+
+  - name: klaster-rabbitmq
+    rules:
+      # Satu node mati: klaster masih melayani (quorum 2 dari 3), tetapi
+      # kegagalan node berikutnya menghentikan antrean.
+      - alert: NodeRabbitMQMati
+        expr: up{job="rabbitmq"} == 0
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: "Node RabbitMQ {{ $labels.instance }} tidak dapat di-scrape"
+          description: "Klaster masih melayani selama 2 dari 3 node hidup. Pulihkan node ini sebelum node lain gagal."
+
+      - alert: KlasterRabbitMQKehilanganQuorum
+        expr: count(up{job="rabbitmq"} == 1) < 2
+        for: 30s
+        labels: { severity: critical }
+        annotations:
+          summary: "Kurang dari 2 node RabbitMQ hidup: quorum queue berhenti melayani"
+
+  - name: layanan
+    rules:
+      # Satu replika mati: layanan masih jalan di replika lain.
+      - alert: ReplikaMati
+        expr: up{job=~"auth|poem|wordcloud|search|kbbi-linker|nlp-worker"} == 0
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Replika {{ $labels.job }} {{ $labels.instance }} tidak merespons"
+
+      - alert: GatewayMati
+        expr: up{job="gateway"} == 0 or nginx_up == 0
+        for: 30s
+        labels: { severity: critical }
+        annotations:
+          summary: "Gateway {{ $labels.gateway }} tidak sehat; CloudFront seharusnya pindah ke gateway lain"
+
+      - alert: CircuitBreakerSearchTerbuka
+        expr: max(search_breaker_state) == 1
+        for: 30s
+        labels: { severity: warning }
+        annotations:
+          summary: "Breaker pencarian terbuka: MySQL bermasalah, search menjawab dari salinan stale atau 503"
+
+      - alert: Rasio5xxTinggi
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[2m]))
+            / clamp_min(sum(rate(http_requests_total[2m])), 0.000001) > 0.05
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Lebih dari 5% request berakhir 5xx ({{ $value | humanizePercentage }})"

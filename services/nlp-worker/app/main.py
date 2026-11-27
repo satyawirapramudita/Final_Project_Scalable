@@ -41,13 +41,18 @@ def handle_poem_event(data: dict) -> None:
         payload.get("keyword", ""),
     )
 
-    messaging.publish(
-        events.POEM_ANALYZED,
-        events.poem_analyzed_payload(
-            poem_id=poem_id, tags=tags, kata_puitif=kata_puitif, terms=terms
-        ),
-        data.get("correlation_id"),
-    )
+    try:
+        # Melempar bila gagal: pesan asal tidak di-ack, diulang, lalu ke DLQ.
+        messaging.publish(
+            events.POEM_ANALYZED,
+            events.poem_analyzed_payload(
+                poem_id=poem_id, tags=tags, kata_puitif=kata_puitif, terms=terms
+            ),
+            data.get("correlation_id"),
+        )
+    except Exception:
+        JOBS_PROCESSED.labels(config.SERVICE_NAME, "publish_failed").inc()
+        raise
     JOBS_PROCESSED.labels(config.SERVICE_NAME, "ok").inc()
     log.info("poem %s dianalisis: %s tag, %s kata puitis", poem_id, len(tags), len(kata_puitif))
 

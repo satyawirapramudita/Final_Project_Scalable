@@ -67,17 +67,36 @@ Port tidak dibuka ke internet (Security Group cukup port 22 dan 80). Akses lewat
 
 ```bash
 ssh -L 3000:localhost:3000 -L 9090:localhost:9090 -L 15672:localhost:15672 ubuntu@<IP_EC2>
+# 15672 = RabbitMQ management (rabbit-1; menampilkan seluruh klaster 3 node)
 ```
 
 Lalu buka http://localhost:3000. Ganti `GRAFANA_ADMIN_PASSWORD` di `.env` sebelum deploy.
 
 ## Memori
 
-Terukur lokal tanpa beban berat: Prometheus ~50 MiB, Grafana ~70 MiB, nginx-exporter ~10 MiB. Seluruh 14 container ~1,0 GiB.
+Terukur lokal saat idle (27 Nov 2026): Prometheus ~86 MiB, Grafana ~57 MiB, nginx-exporter ~10 MiB per instans, RabbitMQ ~150 MiB per node. Seluruh 24 container ~2,2 GiB.
 Prometheus tumbuh seiring jumlah deret waktu dan lama retensi; ukur ulang saat uji beban di instance EC2.
+Setiap container punya `mem_limit` dan `pids_limit` (lihat docker-compose.yml); `docker stats` menampilkan pemakaian terhadap batasnya.
+
+## Alert
+
+Rule ada di `prometheus/alerts.yml`; statusnya di http://localhost:9090/alerts.
+
+| Alert | Kapan |
+|---|---|
+| DeadLetterQueueTidakKosong | DLQ mana pun berisi pesan selama 1 menit |
+| OutboxMenumpuk | event outbox poem tertua belum terkirim > 60 dtk |
+| AntreanMenumpuk / AntreanTanpaKonsumen | antrean > 500 pesan selama 5 menit / tanpa konsumen 2 menit |
+| NodeRabbitMQMati / KlasterRabbitMQKehilanganQuorum | satu node mati / kurang dari 2 node hidup |
+| ReplikaMati / GatewayMati | replika layanan atau gateway tidak dapat di-scrape |
+| CircuitBreakerSearchTerbuka | breaker pencarian terbuka (MySQL bermasalah) |
+| Rasio5xxTinggi | > 5% request berakhir 5xx selama 2 menit |
+
+Saat DLQ berisi pesan, periksa dan kirim ulang dengan `scripts/replay_dlq.py`
+(cara pakai di docstring skrip itu).
 
 ## Batasan yang diketahui
 
 - **Tidak ada metrik CPU/memori container** (butuh cAdvisor). Gunakan `docker stats` selama uji beban.
-- **Tidak ada alert rule**; DLQ dan error 5xx hanya berubah merah di dashboard.
+- **Tidak ada Alertmanager**: alert hanya terlihat di Prometheus (dan Grafana lewat `ALERTS{}`), tanpa notifikasi email/chat.
 - Latensi gateway tidak tersedia (stub_status tidak memuat latensi); gunakan histogram per layanan.
