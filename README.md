@@ -10,11 +10,11 @@ Transformasi dari monolit stateful [Monolithic-Stateful-AWS-Deployment](https://
 
 ## Arsitektur
 
-Enam layanan di belakang satu gerbang Nginx:
+Enam layanan di belakang gateway Nginx (dua instans identik):
 
 | Layanan | Tugas | Pemilik |
 |---|---|---|
-| `gateway` (Nginx) | Pintu masuk tunggal: routing `/api/*` ke layanan, menyajikan frontend, rate limit per IP, `X-Request-ID`, pemeriksaan akses puisi privat (`auth_request`) untuk wordcloud/kbbi, dan micro-cache wordcloud/kbbi | Anders |
+| `gateway` (Nginx) | Pintu masuk, dua instans identik (`gateway` = gateway-a dan `gateway-b`; CloudFront pindah ke gateway-b bila gateway-a gagal): routing `/api/*` ke layanan, menyajikan frontend, rate limit per IP, `X-Request-ID`, pemeriksaan akses puisi privat (`auth_request`) untuk wordcloud/kbbi, dan micro-cache wordcloud/kbbi | Anders |
 | `auth` | Registrasi dan login, hashing password, penerbitan JWT (stateless, tanpa sesi di server) | Ardi |
 | `poem` | CRUD puisi, visibilitas publik/privat, idempotency key, cache baca, publish event lewat transactional outbox, menyimpan tag dari `poem.analyzed` | Satya |
 | `nlp-worker` | Analisis teks asinkron (tag, Kata Puitif, frekuensi istilah) lalu publish `poem.analyzed` | Satya |
@@ -27,11 +27,13 @@ Tugas lintas layanan:
 | Bagian | Isi | Pemilik |
 |---|---|---|
 | Kontrak event | `shared/events.py`, [`docs/event-contracts.md`](docs/event-contracts.md) | Satya |
-| Observability | Prometheus, Grafana (dashboard p95/p99), nginx-exporter, autoheal | Anders |
+| Observability | Prometheus, Grafana (dashboard p95/p99), alert rule, nginx-exporter, autoheal | Anders |
 | Deployment AWS & gambar puisi | EC2, S3, CloudFront, Lambda generator gambar ([`docs/deployment.md`](docs/deployment.md)) | Ardi |
+| Deploy AWS Academy Sandbox | 3 server `t3.small` + S3 + CloudFront dengan satu skrip ([`deploy/sandbox/`](deploy/sandbox/README.md)) | Anders |
 
-Komunikasi: sinkron (HTTP) untuk login, baca, dan cari; asinkron (**RabbitMQ**) untuk NLP, word cloud,
-KBBI, dan indeks pencarian. Store: MySQL (database terpisah per layanan) + Redis (cache).
+Komunikasi: sinkron (HTTP) untuk login, baca, dan cari; asinkron (**RabbitMQ**, klaster 3 node dengan
+quorum queue) untuk NLP, word cloud, KBBI, dan indeks pencarian. Store: MySQL (database terpisah per
+layanan) + Redis (cache).
 
 ## Struktur
 
@@ -66,12 +68,17 @@ Copy-Item .env.example .env      # sesuaikan password/secret
 docker compose up --build -d
 ```
 
-- Aplikasi (via gateway): **http://localhost:8080**
-- RabbitMQ management: **http://localhost:15672** (user/pass dari `.env`)
+- Aplikasi (via gateway-a): **http://localhost:8080**; gateway-b (salinan identik): **http://localhost:8081**
+- RabbitMQ management: **http://localhost:15672** (user/pass dari `.env`; menampilkan ketiga node klaster)
 - Grafana (dashboard SLO): **http://localhost:3000** (`admin` / `GRAFANA_ADMIN_PASSWORD`), Prometheus: **http://localhost:9090**
 - Cek kesehatan: `curl http://localhost:8080/health`
 
 Menghentikan: `docker compose down` (data bertahan di volume; tambah `-v` untuk hapus).
+
+Stack berisi **24 container** (±2,2 GiB RAM saat idle): 2 gateway, 6 layanan × 2 replika, RabbitMQ 3
+node, MySQL, Redis, Prometheus, Grafana, 2 nginx-exporter, dan autoheal. Setiap container punya
+`mem_limit` dan `pids_limit`, sehingga container yang bocor memori di-restart sendiri tanpa
+menjatuhkan container lain.
 
 **Self-healing.** Container `puisi-autoheal` me-restart layanan stateless (gateway, auth, poem,
 wordcloud, search, kbbi-linker, nlp-worker) yang health check-nya gagal, kasus yang tidak ditangani
@@ -144,6 +151,19 @@ event dikirim otomatis begitu broker pulih; tidak ada event yang hilang. Pantau 
 `poem_outbox_pending`, `poem_outbox_oldest_pending_seconds`, `poem_outbox_published_total`, dan
 `poem_outbox_relay_errors_total`. Pengiriman bersifat *at-least-once* (konsumen sudah idempoten).
 
+**Klaster RabbitMQ.** Broker berjalan sebagai **klaster 3 node** (`rabbit-1..3`, konfigurasi di
+`rabbitmq/20-cluster.conf`) dengan **quorum queue**: setiap pesan baru dikonfirmasi setelah tersimpan
+di 2 dari 3 node, sehingga matinya satu node tidak menghentikan pengiriman event dan tidak
+menghilangkan pesan. Klien menerima daftar ketiga node (`RABBITMQ_HOSTS`), mencobanya dalam urutan
+acak, dan pindah ke node lain saat koneksi putus. Bila nlp-worker gagal menerbitkan `poem.analyzed`,
+pesan asalnya diulang lalu masuk DLQ, bukan di-ack dan hilang. Uji: `docker kill puisi-rabbit-1`,
+kirim puisi, dan puisi tetap dianalisis.
+
+**Alert dan DLQ.** Prometheus memuat rule di `observability/prometheus/alerts.yml` (DLQ berisi
+pesan, outbox menumpuk, node RabbitMQ mati, replika/gateway mati, breaker pencarian terbuka, rasio
+5xx); statusnya di http://localhost:9090/alerts. Pesan DLQ diperiksa dan dikirim ulang dengan
+`scripts/replay_dlq.py` (cara pakai di docstring skrip).
+
 **Uji skalabilitas.** `python loadtest/scale_test.py` menjalankan k6 lewat gateway pada 1–4 replika
 search dan mencetak throughput, p50/p95/p99, serta CPU per replika (hasil di `loadtest/results/`).
 
@@ -167,7 +187,13 @@ Pemilik schema: **Satya**. Perubahan bersifat *additive*.
 Rencana & langkah deployment AWS ada di [`docs/deployment.md`](docs/deployment.md)
 (EC2 + Docker Compose; S3 + CloudFront + Lambda; region `us-east-1`).
 
-**Tutorial dari nol sampai running:** [`docs/deploy-aws-tutorial.md`](docs/deploy-aws-tutorial.md).
+**Tutorial dari nol sampai running:** [`docs/deploy-aws-tutorial.md`](docs/deploy-aws-tutorial.md)
+(akun AWS biasa, satu EC2 `t3.large`).
+
+**AWS Academy Sandbox (Learner Lab):** sandbox hanya mengizinkan EC2 sampai `t3.small` dan menghapus
+semua sumber daya saat sesi habis, jadi stack dipecah ke 3 server dan dibuat ulang dengan satu skrip
+dari CloudShell: [`deploy/sandbox/README.md`](deploy/sandbox/README.md).
+
 Skrip bantu ada di `deploy/`:
 
 | Skrip | Kegunaan |
@@ -175,6 +201,7 @@ Skrip bantu ada di `deploy/`:
 | `deploy/gen-secrets.sh` | membuat `.env` produksi dengan secret acak (mode 600) |
 | `deploy/ec2-bootstrap.sh` | user-data EC2 Ubuntu 24.04: Docker, Compose v2, swap 4 GB, rotasi log |
 | `deploy/backup-mysql.sh` | `mysqldump` semua database + unggah ke S3 (opsional) |
+| `deploy/sandbox/deploy.sh` | deploy AWS Academy Sandbox: 3 × `t3.small` + S3 + CloudFront (origin group gateway-a → gateway-b) |
 
 ## Aturan kontribusi
 
