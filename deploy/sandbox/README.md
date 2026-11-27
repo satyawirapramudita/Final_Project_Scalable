@@ -29,35 +29,59 @@ berbeda**, jadi failover CloudFront melindungi dari matinya satu server. Server 
 kegagalan tunggal (MySQL memang satu server); RabbitMQ 3 node di server itu melindungi dari crash node,
 bukan dari matinya server data.
 
-## Langkah (±40–60 menit, kebanyakan menunggu)
+## Panduan cepat (bisa diikuti tanpa mengenal proyek)
 
-1. Halaman lab: **Start Lab**, tunggu lampu **AWS** hijau, klik **AWS** (console terbuka di `us-east-1`).
+Yang dibutuhkan: akun AWS Academy sendiri dengan lab **Sandbox**, dan browser. Tidak perlu memasang
+apa pun, dan tidak perlu kredensial orang lain. Siapkan ±30 menit sebelum dipakai.
+
+1. Buka halaman lab, klik **Start Lab**, tunggu lampu **AWS** hijau, lalu klik **AWS**
+   (console terbuka; pastikan region `us-east-1`). Lihat sisa waktu di timer.
 2. Buka **CloudShell** (ikon `>_` di bilah atas console).
-3. Jalankan:
+3. Tempel perintah ini:
    ```bash
-   git clone -b <branch> https://github.com/satyawirapramudita/Final_Project_Scalable
-   cd Final_Project_Scalable && bash deploy/sandbox/deploy.sh buat
+   rm -rf ~/.poetify-sandbox Final_Project_Scalable   # sisa sesi lama (hanya di awal sesi baru)
+   git clone -b feat/sandbox-deploy https://github.com/satyawirapramudita/Final_Project_Scalable
+   cd Final_Project_Scalable
+   BRANCH=feat/sandbox-deploy bash deploy/sandbox/deploy.sh buat
    ```
-   `<branch>` = `main` bila sudah di-merge, atau nama branch fitur. Variabel `BRANCH` mengatur branch
-   yang di-clone di server (bawaan `main`): `BRANCH=<branch> bash deploy/sandbox/deploy.sh buat`.
-4. Di akhir, skrip mencetak alamat **CloudFront** (`https://dxxxx.cloudfront.net/`) dan IP ketiga server.
+4. Biarkan tab terbuka sampai selesai. Pesan `mode group ditolak ... InvalidArgument` **normal**:
+   skrip lanjut sendiri memakai mode `split`.
+5. Berhasil bila bagian `Smoke test` menampilkan `200` untuk app-1, app-2, dan CloudFront `/`, serta
+   `401` untuk dua baris `/api/...`. Alamat aplikasi tercetak di baris `CloudFront : https://....cloudfront.net/`
+   (alamatnya baru setiap kali deploy). Tampilkan lagi kapan saja: `bash deploy/sandbox/deploy.sh info`.
+6. Buka alamat itu, daftar akun, kirim satu puisi, lalu cari di halaman pencarian.
+7. Kamus (KBBI) diimpor di latar belakang: `bash deploy/sandbox/deploy.sh kbbi-status` sampai muncul
+   `SELESAI`.
+
+**Bila terputus di tengah jalan** (CloudShell tertutup atau error): **jangan** jalankan `buat` lagi,
+karena akan membuat 3 server tambahan. Masuk ke folder proyek, lalu jalankan langkah yang belum
+selesai satu per satu, selalu dengan `BRANCH=feat/sandbox-deploy`:
+
+```bash
+cd ~/Final_Project_Scalable && export BRANCH=feat/sandbox-deploy
+bash deploy/sandbox/deploy.sh tunggu     # lalu: kbbi, cdn, seed, uji, info
+```
+
+Bila gagal di langkah `server` (server belum lengkap): `bash deploy/sandbox/deploy.sh hapus`, lalu ulangi
+dari langkah 3.
+
+Variabel `BRANCH` menentukan branch yang di-clone **di server** (bawaan `main`). Setelah branch ini
+di-merge ke `main`, `-b ...` dan `BRANCH=...` tidak diperlukan lagi.
+
+**Perpanjang sesi:** klik **Start Lab** lagi sebelum timer 0:00 (terutama saat uji beban), atau semua
+sumber daya hilang. Rahasia (password DB, JWT, cookie Erlang, password Grafana) dibuat acak per sesi di
+`~/.poetify-sandbox/secrets.env`.
 
 Yang dikerjakan `buat`, berurutan (masing-masing juga bisa dijalankan sendiri):
 
 | Perintah | Isi | Waktu |
 |---|---|---|
 | `server` | Security Group (antaranggota grup: semua port; dari internet: 22, 80), 3 server dengan bootstrap otomatis | ±3 menit |
-| `tunggu` | menunggu bootstrap lewat SSM: data (pull image), app-1/app-2 (build 6 image di 2 vCPU) | ±15–25 menit |
-| `kbbi` | app-1 mengunduh dataset KBBI V (21 MB, [GitHub, commit dipaku](https://github.com/aryakdaniswara/kbbi-dataset-kbbi-v)) dan meringkasnya (kata tunggal, 1 definisi per kata), lalu mengimpornya ke `kbbi_db` (versi `kbbi-v-27b7dc6-ringkas`) **di latar belakang**; aplikasi sudah bisa dipakai. Pantau: `kbbi-status`. Dataset utuh: `KBBI_UTUH=1` | mulai seketika; ringkas diperkirakan ±25 menit (utuh ±45), belum diukur |
-| `cdn` | bucket S3 + frontend, distribusi CloudFront dengan origin group | ±10–15 menit |
+| `tunggu` | menunggu bootstrap lewat SSM: data (pull image), app-1/app-2 (build 6 image di 2 vCPU) | ±3 menit (teramati) |
+| `kbbi` | app-1 mengunduh dataset KBBI V (21 MB, [GitHub, commit dipaku](https://github.com/aryakdaniswara/kbbi-dataset-kbbi-v)) dan meringkasnya (kata tunggal, 1 definisi per kata), lalu mengimpornya ke `kbbi_db` (versi `kbbi-v-27b7dc6-ringkas`) **di latar belakang**; aplikasi sudah bisa dipakai. Pantau: `kbbi-status`. Dataset utuh: `KBBI_UTUH=1` | ringkas ±1,5 menit (teramati); utuh belum diukur |
+| `cdn` | bucket S3 + frontend, distribusi CloudFront dengan origin group | beberapa menit (bisa sampai 15) |
 | `seed` | 1000 puisi contoh untuk pencarian (user 99) | ±1 menit |
 | `uji` | smoke test ke app-1, app-2, dan CloudFront | detik |
-
-Rahasia (password DB, JWT, cookie Erlang, password Grafana) dibuat acak per sesi di
-`~/.poetify-sandbox/secrets.env` (CloudShell).
-
-**Perpanjang sesi:** klik **Start Lab** lagi sebelum timer 0:00 (terutama saat uji beban), atau semua
-sumber daya hilang.
 
 ## Perintah lain
 
@@ -77,7 +101,16 @@ http://localhost:3000.
 - **Target:** alamat CloudFront (perilaku nyata pengguna) atau langsung `http://<IP publik app-1>`
   (tanpa CloudFront). Rate limit gateway sudah dinaikkan (`API_RATE_LIMIT=500r/s`) karena CloudFront
   meneruskan dari sedikit IP edge.
-- Jalankan k6 dari **laptop**, bukan dari server: server hanya 2 vCPU.
+- Jalankan k6 dari **laptop**, bukan dari server: server hanya 2 vCPU. Perlu
+  [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) dan clone repo ini di laptop.
+- Pencarian butuh token. Buat di CloudShell (token user 99, pemilik 1000 puisi contoh):
+  ```bash
+  bash deploy/sandbox/deploy.sh jalankan app-1 'cd /opt/poetify && docker compose exec -T poem python - 99 < scripts/mint_token.py'
+  ```
+  Lalu di laptop, dari folder repo:
+  ```bash
+  k6 run -e BASE_URL=https://<alamat>.cloudfront.net -e TOKEN=<token> loadtest/search.js
+  ```
 - **Matikan gateway-a:** `bash deploy/sandbox/deploy.sh jalankan app-1 'docker stop puisi-gateway'`
   → request GET lewat CloudFront tetap 200 (dilayani app-2). Pulihkan dengan `docker start puisi-gateway`.
 - **Matikan satu node RabbitMQ:** `bash deploy/sandbox/deploy.sh jalankan data 'docker kill puisi-rabbit-1'`
@@ -107,6 +140,7 @@ dipakai tercetak di `info`.
 | CloudFront 502/504 | `curl http://<IP app-1>/health`; origin memakai DNS publik server (berubah bila server di-Stop lalu Start) |
 | Sesi habis di tengah jalan | semua terhapus; mulai lagi dari langkah 1 (`~/.poetify-sandbox` di CloudShell boleh dihapus) |
 
-**Status:** server, bootstrap, dan peran diuji secara lokal (peran data + aplikasi sebagai proyek
-Compose terpisah yang terhubung lewat jaringan, uji ujung ke ujung 9/9 lulus). Deploy penuh di sandbox
-belum dijalankan.
+**Status:** deploy penuh dijalankan di sandbox pada 27 Nov 2026 **dari laptop (Git Bash)**, selesai
+±10 menit: semua container sehat, uji ujung ke ujung 9/9 lulus lewat CloudFront dan app-2, pencarian
+tetap sampai ke layanan saat gateway-a dimatikan, dan KBBI ringkas (71.737 entri) selesai diimpor.
+Jalur **CloudShell** pada panduan cepat belum dicoba. Uji beban k6 belum dijalankan di sandbox.
