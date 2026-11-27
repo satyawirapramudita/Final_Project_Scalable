@@ -48,6 +48,7 @@ Yang dikerjakan `buat`, berurutan (masing-masing juga bisa dijalankan sendiri):
 |---|---|---|
 | `server` | Security Group (antaranggota grup: semua port; dari internet: 22, 80), 3 server dengan bootstrap otomatis | ±3 menit |
 | `tunggu` | menunggu bootstrap lewat SSM: data (pull image), app-1/app-2 (build 6 image di 2 vCPU) | ±15–25 menit |
+| `kbbi` | app-1 mengunduh dataset KBBI V (21 MB, [GitHub, commit dipaku](https://github.com/aryakdaniswara/kbbi-dataset-kbbi-v)) dan mengimpornya ke `kbbi_db` (versi `kbbi-v-27b7dc6`, sama dengan lokal) | ±3–10 menit |
 | `cdn` | bucket S3 + frontend, distribusi CloudFront dengan origin group | ±10–15 menit |
 | `seed` | 1000 puisi contoh untuk pencarian (user 99) | ±1 menit |
 | `uji` | smoke test ke app-1, app-2, dan CloudFront | detik |
@@ -90,7 +91,7 @@ dipakai tercetak di `info`.
 
 ## Batasan
 
-- Dataset KBBI tidak ikut (tidak ada di repo); tautan KBBI kosong.
+- Dataset KBBI tidak disimpan di repo; langkah `kbbi` mengunduhnya langsung ke server saat deploy.
 - Lambda generator gambar tidak dibuat; fitur gambar otomatis mati, puisi tetap bisa dikirim.
 - Angka uji beban dari server 2 vCPU tidak sebanding dengan hasil lokal (16 thread) di `docs/slo.md`.
 

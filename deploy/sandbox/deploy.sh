@@ -19,6 +19,7 @@
 #   buat           semua langkah di bawah berurutan (±40-60 menit)
 #   server         Security Group + 3 server (bootstrap otomatis)
 #   tunggu         tunggu ketiga server selesai bootstrap
+#   kbbi           unduh dataset KBBI V (GitHub, commit dipaku) dan import ke kbbi_db
 #   cdn            S3 frontend + CloudFront
 #   seed           isi 1000 puisi contoh untuk pencarian (user 99)
 #   uji            smoke test lewat CloudFront dan langsung ke app-1/app-2
@@ -32,9 +33,15 @@ REGION="${AWS_REGION:-us-east-1}"
 REPO="${REPO:-https://github.com/satyawirapramudita/Final_Project_Scalable}"
 BRANCH="${BRANCH:-main}"
 TYPE="${INSTANCE_TYPE:-t3.small}"
+# Dataset KBBI V (tidak disimpan di repo). URL dipaku ke satu commit agar isinya tidak berubah;
+# versi dataset sama dengan yang dipakai tim secara lokal.
+KBBI_URL="${KBBI_URL:-https://raw.githubusercontent.com/aryakdaniswara/kbbi-dataset-kbbi-v/27b7dc6ba208eecd771354f4d0bc069091e4f4a9/csv/kbbi_v.csv}"
+KBBI_VERSION="${KBBI_VERSION:-kbbi-v-27b7dc6}"
 TAG="poetify-sandbox"
 STATE="${HOME}/.poetify-sandbox"          # rahasia + ID sumber daya (per sesi)
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# Git Bash di Windows: AWS CLI (Python Windows) butuh path C:/..., bukan /c/...
+command -v cygpath >/dev/null && ROOT="$(cygpath -m "$ROOT")"
 mkdir -p "$STATE"
 
 aws_() { aws --region "$REGION" "$@"; }
@@ -74,9 +81,10 @@ vals.update({
     "SEARCH_REPLICAS": "1", "KBBI_REPLICAS": "1", "NLP_WORKER_REPLICAS": "1",
     # CloudFront meneruskan dari sedikit IP edge: 20 r/s per IP terlalu ketat.
     "API_RATE_LIMIT": "500r/s", "API_BURST": "1000",
+    "KBBI_DATASET_VERSION": sys.argv[4],
 })
 print("\n".join(f"{k}={v}" for k, v in vals.items()))
-' "$1" "$(cat "$ROOT/.env.example")" "$(cat "$STATE/secrets.env")"
+' "$1" "$(cat "$ROOT/.env.example")" "$(cat "$STATE/secrets.env")" "$KBBI_VERSION"
 }
 
 user_data() {  # user_data <role> <data_ip> [app2_ip]
@@ -277,6 +285,19 @@ PY
   echo "CloudFront siap: https://$(baca cf_dns)/"
 }
 
+kbbi() {
+  langkah "Import dataset KBBI ($KBBI_VERSION) dari GitHub ke kbbi_db (±3-10 menit)"
+  # Diunduh langsung oleh app-1 (tidak lewat laptop/CloudShell); importer berjalan dalam
+  # container kbbi-linker sekali pakai dan menulis ke MySQL di server data.
+  ssm "$(baca app1)" "set -e; cd /opt/poetify
+curl -fsSL '$KBBI_URL' -o /tmp/kbbi_v.csv
+ls -la /tmp/kbbi_v.csv
+docker compose -f docker-compose.yml -f deploy/sandbox/app.yml run --rm --no-deps -T \
+  -v /tmp/kbbi_v.csv:/data/kbbi.csv:ro kbbi-linker \
+  python scripts/import_kbbi_csv.py /data/kbbi.csv --version '$KBBI_VERSION' 2>&1 | tail -5
+rm -f /tmp/kbbi_v.csv"
+}
+
 seed() {
   langkah "Seed 1000 puisi contoh (user 99) untuk pencarian"
   ssm "$(baca app1)" 'cd /opt/poetify && docker compose exec -T search python - --count 1000 --user 99 < scripts/publish_fake_events.py | tail -3'
@@ -337,9 +358,10 @@ hapus() {
 }
 
 case "${1:-}" in
-  buat)     server; tunggu; cdn; seed; uji; info ;;
+  buat)     server; tunggu; kbbi; cdn; seed; uji; info ;;
   server)   server ;;
   tunggu)   tunggu ;;
+  kbbi)     kbbi ;;
   cdn)      cdn ;;
   seed)     seed ;;
   uji)      uji ;;
