@@ -3,7 +3,9 @@
 **Pemilik:** Satya (poem + nlp-worker)
 **Status:** dibekukan di fase F3. Perubahan bersifat *additive* (tambah field boleh, hapus/tubah tidak) dan harus disepakati semua pemilik konsumen.
 
-Broker: **RabbitMQ**, satu topic exchange `poem.events`. Setiap konsumen punya queue durable sendiri.
+Broker: **RabbitMQ** (klaster 3 node), satu topic exchange `poem.events`. Setiap konsumen punya queue
+sendiri bertipe **quorum** (direplikasi ke ketiga node; `RABBITMQ_QUEUE_TYPE=quorum`), begitu pula DLQ-nya.
+Tipe antrean tidak mengubah kontrak: exchange, routing key, dan format event tetap sama.
 
 ## Routing key & konsumen
 
