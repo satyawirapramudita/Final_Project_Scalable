@@ -19,6 +19,15 @@ def test_params_satu_parameter_per_node_dan_cepat_pindah():
     assert all(p.connection_attempts == 1 for p in params)
 
 
+def test_params_host_dengan_port():
+    params = rabbit._params("10.0.0.5:5672,10.0.0.5:5673,10.0.0.5:5674", 5672, "u", "p", "/")
+    assert sorted((p.host, p.port) for p in params) == [
+        ("10.0.0.5", 5672), ("10.0.0.5", 5673), ("10.0.0.5", 5674)
+    ]
+    (param,) = rabbit._params("rabbit-1", 5672, "u", "p", "/")
+    assert (param.host, param.port) == ("rabbit-1", 5672)
+
+
 def test_params_satu_node_tetap_mengulang():
     (param,) = rabbit._params("rabbitmq", 5672, "u", "p", "/")
     assert param.host == "rabbitmq"

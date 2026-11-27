@@ -11,6 +11,10 @@ Browser ──HTTPS──▶ CloudFront ──┬── default  ──▶ S3 (f
 Perkiraan waktu: **±90 menit** (tanpa Lambda) / **±2 jam** (dengan Lambda).
 Perkiraan biaya: **±$3–5 untuk 1–2 hari demo** dengan `t3.large`; ±$65/bulan bila dibiarkan menyala.
 
+> **Memakai AWS Academy Sandbox (Learner Lab)?** Tutorial ini tidak berlaku di sana: sandbox menolak
+> `t3.medium`/`t3.large` dan menghapus semuanya saat sesi habis. Pakai
+> [`deploy/sandbox/README.md`](../deploy/sandbox/README.md) (3 × `t3.small`, satu skrip).
+>
 > Semua perintah dijalankan di **laptop** kecuali yang diberi tanda “(di EC2)”.
 > Ganti nilai berhuruf kapital seperti `<BUCKET>`, `<EIP>`, `<CF-DOMAIN>` dengan milik Anda.
 

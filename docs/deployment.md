@@ -8,6 +8,11 @@
 > **Tutorial langkah-demi-langkah (EC2 + S3 + CloudFront + Lambda, dari nol sampai running):**
 > [`docs/deploy-aws-tutorial.md`](deploy-aws-tutorial.md).
 > Dokumen ini menjelaskan *mengapa*; tutorial menjelaskan *perintah dan klik*-nya.
+>
+> **AWS Academy Sandbox (Learner Lab):** `t3.medium`/`t3.large` ditolak (`UnauthorizedOperation`, juga
+> lewat Elastic Beanstalk) dan semua sumber daya dihapus saat sesi habis. Gunakan
+> [`deploy/sandbox/`](../deploy/sandbox/README.md): 3 × `t3.small` + S3 + CloudFront dengan satu skrip
+> (bagian 4b di bawah).
 
 ---
 
@@ -17,8 +22,8 @@
 |---|---|
 | Instance | **t3.large** (8 GB, 30 GB gp3) — `t3.medium` cukup untuk demo trafik rendah |
 | Perintah deploy | `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build` |
-| Container | 19 (12 container aplikasi dari 2 replika + gateway + MySQL/Redis/RabbitMQ + observability) |
-| Port publik | **80** (gateway). Grafana/Prometheus/RabbitMQ UI hanya `127.0.0.1` → SSH tunnel |
+| Container | 24 (12 container aplikasi dari 2 replika + 2 gateway + MySQL/Redis + RabbitMQ 3 node + observability), ±2,2 GiB idle |
+| Port publik | **80** (gateway-a) dan **81** (gateway-b, origin kedua CloudFront), keduanya dari prefix list CloudFront. Grafana/Prometheus/RabbitMQ UI hanya `127.0.0.1` → SSH tunnel |
 | Secret | `bash deploy/gen-secrets.sh` (membuat `.env` acak, mode 600) |
 | Password DB | `db/02-env-passwords.sh` menyamakan user MySQL dengan `.env` saat volume baru |
 | Backup | `BACKUP_S3=s3://<bucket>/backups bash deploy/backup-mysql.sh` |
@@ -62,9 +67,12 @@ sebelum mengutip di laporan.
 Browser
  ├─ Aset statis & gambar ──▶ CloudFront ──▶ S3
  ├─ /fungsi*  ────────────▶ CloudFront ──▶ Lambda Function URL (generator gambar)
- └─ /api/*    ────────────▶ CloudFront ──▶ EC2 (gateway Nginx)
-                                              └─▶ 7 layanan + MySQL + Redis + RabbitMQ
+ └─ /api/*    ────────────▶ CloudFront ──▶ origin group: EC2 gateway-a :80, pindah ke gateway-b :81 bila 5xx
+                                              └─▶ 6 layanan × 2 replika + MySQL + Redis + RabbitMQ (3 node)
 ```
+
+Failover origin group CloudFront hanya berlaku untuk request GET, HEAD, dan OPTIONS; request tulis
+tetap ke gateway-a dan diulang klien dengan Idempotency-Key yang sama (lihat tutorial langkah 10.4b).
 
 - **S3 + CloudFront + Lambda** = komponen cloud-native (dari Tugas 1, dipertahankan).
 - **EC2** = seluruh stack backend via Docker Compose.
@@ -130,7 +138,7 @@ Browser
 ### 4.4 Amazon EC2 (stack backend)
 
 1. Launch instance **t3.small (2 GB) minimum, t3.medium (4 GB) disarankan**.
-2. Security Group inbound: **22** (SSH), **80/443** (via CloudFront/ALB). MySQL/Redis/RabbitMQ **tidak** dibuka.
+2. Security Group inbound: **22** (SSH), **80/443** (via CloudFront/ALB), **81** (gateway-b, hanya dari prefix list CloudFront). MySQL/Redis/RabbitMQ **tidak** dibuka.
 3. Tambah swap 2–4 GB:
    ```bash
    sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile
@@ -163,6 +171,28 @@ Browser
 
 ---
 
+## 4b. Jalur Sandbox — AWS Academy (3 × t3.small)
+
+Sandbox AWS Academy membatasi EC2 ke `t2`/`t3` sampai `small` (2 GiB; `t3.medium`/`t3.large` ditolak,
+juga lewat Elastic Beanstalk, terverifikasi 27 Nov 2026), maksimal 9 instance, dan **menghapus semua
+sumber daya saat timer sesi habis**. Stack ±2,2 GiB tidak muat di satu server, jadi dipecah per peran:
+
+| Server | Isi | Catatan |
+|---|---|---|
+| `data` | MySQL, Redis, RabbitMQ 3 node (port 5672/5673/5674) | `deploy/sandbox/data.yml`, batas memori diperkecil |
+| `app-1` | gateway-a + 1 replika tiap layanan + Prometheus/Grafana | origin utama CloudFront |
+| `app-2` | gateway-b + 1 replika tiap layanan | origin kedua CloudFront, zona berbeda |
+
+Dua server aplikasi = dua replika per layanan, dan kedua gateway berada di **mesin berbeda**, sehingga
+failover CloudFront juga melindungi dari matinya satu server (bukan hanya container). Server data tetap
+titik kegagalan tunggal, seperti MySQL pada jalur A.
+
+Semua langkah (Security Group, 3 server dengan bootstrap otomatis, S3 frontend, CloudFront dengan origin
+group, seed data, smoke test) dijalankan `bash deploy/sandbox/deploy.sh buat` dari CloudShell, ±40–60 menit.
+Rincian: [`deploy/sandbox/README.md`](../deploy/sandbox/README.md).
+
+---
+
 ## 5. Jalur B — Full Cloud AWS (evolusi)
 
 Pemetaan lengkap ada di dokumen rencana §13. Ringkasnya:
@@ -189,14 +219,18 @@ Pemetaan lengkap ada di dokumen rencana §13. Ringkasnya:
 - Log **JSON** ke stdout container → CloudWatch Logs (atau Loki).
 - `correlation_id` (dari `X-Request-ID` gateway) untuk pelacakan lintas layanan.
 - RabbitMQ management untuk queue depth & DLQ.
-- Alarm dasar: DLQ ≠ 0, queue naik, error rate tinggi, container restart berulang.
+- Alert rule Prometheus (`observability/prometheus/alerts.yml`): DLQ ≠ 0, outbox menumpuk, antrean naik
+  atau tanpa konsumen, node RabbitMQ mati, replika/gateway mati, breaker pencarian terbuka, rasio 5xx.
+  Pesan DLQ dikirim ulang dengan `scripts/replay_dlq.py`.
 
 ---
 
 ## 7. Backup, Recovery, dan Rollback
 
 - **Backup:** snapshot EBS + `mysqldump` harian (Jalur A); RDS automated backup + AWS Backup (Jalur B).
-- **Recovery:** restore snapshot / dump; volume Docker bernama (`mysql_data`, `redis_data`, `rabbitmq_data`).
+- **Recovery:** restore snapshot / dump; volume Docker bernama (`mysql_data`, `redis_data`, `rabbit1_data`,
+  `rabbit2_data`, `rabbit3_data`). Data RabbitMQ direplikasi antarnode, jadi kehilangan satu volume node
+  dipulihkan dari dua node lain.
 - **Rollback:** simpan image sebelumnya; `docker compose up -d --build` dengan tag versi lama; CloudFront invalidation untuk aset statis.
 
 ---

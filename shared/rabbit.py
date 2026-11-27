@@ -35,6 +35,17 @@ def hosts(host: str) -> list[str]:
     return [h.strip() for h in host.split(",") if h.strip()]
 
 
+def _host_port(node: str, default_port: int) -> tuple[str, int]:
+    """"10.0.0.5:5673" -> ("10.0.0.5", 5673); "rabbit-1" -> ("rabbit-1", default_port).
+
+    Dipakai saat ketiga node berada di satu host lain dan dibedakan port-nya
+    (deploy/sandbox: node di server data, klien di server aplikasi)."""
+    name, sep, port = node.rpartition(":")
+    if sep and name and port.isdigit():
+        return name, int(port)
+    return node, default_port
+
+
 def queue_type() -> str:
     value = os.getenv("RABBITMQ_QUEUE_TYPE", "classic").strip().lower()
     if value not in ("classic", "quorum"):
@@ -63,8 +74,8 @@ def _params(host: str, port: int, user: str, password: str, vhost: str) -> list[
     attempts = 3 if len(nodes) == 1 else 1
     return [
         pika.ConnectionParameters(
-            host=node,
-            port=port,
+            host=_host_port(node, port)[0],
+            port=_host_port(node, port)[1],
             virtual_host=vhost or "/",
             credentials=pika.PlainCredentials(user, password),
             heartbeat=60,
