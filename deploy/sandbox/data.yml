@@ -1,0 +1,45 @@
+# Override untuk server DATA (AWS Academy Sandbox, t3.small 2 GiB).
+# Dipakai: docker compose -f docker-compose.yml -f deploy/sandbox/data.yml up -d --no-deps \
+#            mysql redis rabbit-1 rabbit-2 rabbit-3
+#
+# Port dibuka di host agar server aplikasi (app-1, app-2) bisa terhubung lewat IP
+# privat. Security Group sandbox hanya mengizinkan lalu lintas antaranggota grup,
+# jadi port ini tidak terbuka ke internet.
+#
+# Tiga node RabbitMQ tetap satu klaster di jaringan Docker server ini; klien di
+# server aplikasi membedakannya lewat port: 5672, 5673, 5674.
+# Batas memori lebih kecil dari docker-compose.yml karena total RAM server 2 GiB.
+services:
+  mysql:
+    mem_limit: 768m
+    ports:
+      - "3306:3306"
+
+  redis:
+    mem_limit: 192m
+    ports:
+      - "6379:6379"
+
+  rabbit-1:
+    mem_limit: 448m
+    ports:
+      - "5672:5672"
+      - "15692:15692"
+    volumes:
+      - ./deploy/sandbox/30-rabbit-kecil.conf:/etc/rabbitmq/conf.d/30-rabbit-kecil.conf:ro,z
+
+  rabbit-2:
+    mem_limit: 448m
+    ports:
+      - "5673:5672"
+      - "15693:15692"
+    volumes:
+      - ./deploy/sandbox/30-rabbit-kecil.conf:/etc/rabbitmq/conf.d/30-rabbit-kecil.conf:ro,z
+
+  rabbit-3:
+    mem_limit: 448m
+    ports:
+      - "5674:5672"
+      - "15694:15692"
+    volumes:
+      - ./deploy/sandbox/30-rabbit-kecil.conf:/etc/rabbitmq/conf.d/30-rabbit-kecil.conf:ro,z

@@ -1,0 +1,32 @@
+# Override untuk server APLIKASI (app-1 dan app-2, AWS Academy Sandbox, t3.small).
+# Dipakai: docker compose -f docker-compose.yml -f deploy/sandbox/app.yml up -d --no-deps \
+#            gateway auth poem wordcloud search kbbi-linker nlp-worker autoheal nginx-exporter
+#          (app-1 juga: prometheus grafana)
+#
+# Setiap server aplikasi menjalankan satu gateway dan satu replika tiap layanan
+# (*_REPLICAS=1 di .env), sehingga dua server = dua replika per layanan dan dua
+# gateway di MESIN BERBEDA. MySQL, Redis, dan RabbitMQ ada di server data; alamatnya
+# diisi lewat .env (MYSQL_HOST, REDIS_HOST, RABBITMQ_HOSTS).
+#
+# Port metrik dibuka di host agar Prometheus di app-1 bisa men-scrape app-2.
+# Security Group hanya mengizinkannya dari anggota grup (bukan internet).
+services:
+  auth:
+    ports: ["8001:8001"]
+  poem:
+    ports: ["8002:8002"]
+  wordcloud:
+    ports: ["8003:8003"]
+  search:
+    ports: ["8004:8004"]
+  kbbi-linker:
+    ports: ["8005:8005"]
+  nlp-worker:
+    ports: ["8100:8100"]
+  nginx-exporter:
+    ports: ["9113:9113"]
+
+  prometheus:
+    volumes:
+      # Dibuat skrip bootstrap di app-1 (target lokal + app-2 + server data).
+      - ./deploy/sandbox/prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
