@@ -49,7 +49,8 @@ apa pun, dan tidak perlu kredensial orang lain. Siapkan ±30 menit sebelum dipak
 5. Berhasil bila bagian `Smoke test` menampilkan `200` untuk app-1, app-2, dan CloudFront `/`, serta
    `401` untuk dua baris `/api/...`. Alamat aplikasi tercetak di baris `CloudFront : https://....cloudfront.net/`
    (alamatnya baru setiap kali deploy). Tampilkan lagi kapan saja: `bash deploy/sandbox/deploy.sh info`.
-6. Buka alamat itu, daftar akun, kirim satu puisi, lalu cari di halaman pencarian.
+6. Buka alamat itu, daftar akun, kirim satu puisi, lalu cari di halaman pencarian. Puisi contoh berisi
+   kata acak dan tanpa gambar (fitur gambar mati di sandbox); itu normal.
 7. Kamus (KBBI) diimpor di latar belakang: `bash deploy/sandbox/deploy.sh kbbi-status` sampai muncul
    `SELESAI`.
 
@@ -80,7 +81,7 @@ Yang dikerjakan `buat`, berurutan (masing-masing juga bisa dijalankan sendiri):
 | `tunggu` | menunggu bootstrap lewat SSM: data (pull image), app-1/app-2 (build 6 image di 2 vCPU) | ±3 menit (teramati) |
 | `kbbi` | app-1 mengunduh dataset KBBI V (21 MB, [GitHub, commit dipaku](https://github.com/aryakdaniswara/kbbi-dataset-kbbi-v)) dan meringkasnya (kata tunggal, 1 definisi per kata), lalu mengimpornya ke `kbbi_db` (versi `kbbi-v-27b7dc6-ringkas`) **di latar belakang**; aplikasi sudah bisa dipakai. Pantau: `kbbi-status`. Dataset utuh: `KBBI_UTUH=1` | ringkas ±1,5 menit (teramati); utuh belum diukur |
 | `cdn` | bucket S3 + frontend, distribusi CloudFront dengan origin group | beberapa menit (bisa sampai 15) |
-| `seed` | 1000 puisi contoh untuk pencarian (user 99) | ±1 menit |
+| `seed` | 1000 puisi contoh (user 99) lewat jalur submit asli, jadi setiap hasil pencarian bisa dibuka; selesai setelah semua dianalisis dan antrean kosong. Jumlah lain: `SEED_COUNT=200`. Cadangan bila gagal: `seed-palsu` (hanya indeks search, hasil tidak bisa dibuka) | ±1 menit (teramati) |
 | `uji` | smoke test ke app-1, app-2, dan CloudFront | detik |
 
 ## Perintah lain
@@ -143,4 +144,5 @@ dipakai tercetak di `info`.
 **Status:** deploy penuh dijalankan di sandbox pada 27 Nov 2026 **dari laptop (Git Bash)**, selesai
 ±10 menit: semua container sehat, uji ujung ke ujung 9/9 lulus lewat CloudFront dan app-2, pencarian
 tetap sampai ke layanan saat gateway-a dimatikan, dan KBBI ringkas (71.737 entri) selesai diimpor.
-Jalur **CloudShell** pada panduan cepat belum dicoba. Uji beban k6 belum dijalankan di sandbox.
+Seed 1000 puisi lewat jalur submit asli
+dikirim dan dianalisis dalam 33 detik, tanpa pesan di DLQ. Jalur **CloudShell** pada panduan cepat belum dicoba. Uji beban k6 belum dijalankan di sandbox.

@@ -16,13 +16,14 @@
 #   cd Final_Project_Scalable && bash deploy/sandbox/deploy.sh buat
 #
 # Perintah:
-#   buat           semua langkah di bawah berurutan (±40-60 menit)
+#   buat           semua langkah di bawah berurutan (±10-20 menit)
 #   server         Security Group + 3 server (bootstrap otomatis)
 #   tunggu         tunggu ketiga server selesai bootstrap
 #   kbbi           unduh dataset KBBI V (GitHub, commit dipaku) dan import ke kbbi_db (latar belakang)
 #   kbbi-status    progres import KBBI
 #   cdn            S3 frontend + CloudFront
-#   seed           isi 1000 puisi contoh untuk pencarian (user 99)
+#   seed           1000 puisi contoh lewat jalur submit asli (user 99); SEED_COUNT=n mengubah jumlah
+#   seed-palsu     cadangan: hanya mengisi indeks search, hasilnya tidak bisa dibuka
 #   uji            smoke test lewat CloudFront dan langsung ke app-1/app-2
 #   info           alamat dan IP
 #   jalankan <data|app-1|app-2> '<perintah>'   perintah di server lewat SSM
@@ -332,8 +333,14 @@ kbbi_status() {
 docker exec puisi-mysql mysql -uroot -p\"\$R\" -hlocalhost -N -e \"SELECT CONCAT(COUNT(*), ' dari ±$KBBI_ENTRI entri') FROM kbbi_db.kbbi_entries WHERE dataset_version = '$KBBI_VERSION'\" 2>/dev/null"
 }
 
-seed() {
-  langkah "Seed 1000 puisi contoh (user 99) untuk pencarian"
+seed() {  # puisi asli lewat POST /api/poems, sehingga setiap hasil pencarian bisa dibuka
+  local jumlah="${SEED_COUNT:-1000}"
+  langkah "Seed $jumlah puisi contoh (user 99) lewat jalur submit asli"
+  ssm "$(baca app1)" "cd /opt/poetify && docker compose exec -T poem python - --count $jumlah --user 99 < scripts/seed_real_poems.py"     || echo "Seed gagal atau belum selesai. Ulangi 'seed', atau pakai 'seed-palsu' (hanya untuk pencarian)."
+}
+# Cadangan bila `seed` gagal. Jangan dicampur: hasil palsu menampilkan "Puisi tidak ditemukan".
+seed_palsu() {
+  langkah "Seed palsu: 1000 puisi hanya di indeks search (hasilnya tidak bisa dibuka)"
   ssm "$(baca app1)" 'cd /opt/poetify && docker compose exec -T search python - --count 1000 --user 99 < scripts/publish_fake_events.py | tail -3'
 }
 
@@ -399,9 +406,10 @@ case "${1:-}" in
   kbbi-status) kbbi_status ;;
   cdn)      cdn ;;
   seed)     seed ;;
+  seed-palsu) seed_palsu ;;
   uji)      uji ;;
   info)     info ;;
   jalankan) shift; ssm "$(id_peran "$1")" "$2" ;;
   hapus)    hapus ;;
-  *)        sed -n '2,30p' "$0"; exit 1 ;;
+  *)        sed -n '2,31p' "$0"; exit 1 ;;
 esac
