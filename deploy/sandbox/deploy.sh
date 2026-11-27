@@ -12,7 +12,7 @@
 #                                └─ /api/*  ─▶ origin group: app-1, pindah ke app-2 bila 5xx/gagal
 #
 # Jalankan di AWS CloudShell (kredensial lab sudah tersedia):
-#   git clone -b <branch> https://github.com/satyawirapramudita/Final_Project_Scalable
+#   git clone https://github.com/satyawirapramudita/Final_Project_Scalable
 #   cd Final_Project_Scalable && bash deploy/sandbox/deploy.sh buat
 #
 # Perintah:

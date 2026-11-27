@@ -40,9 +40,9 @@ apa pun, dan tidak perlu kredensial orang lain. Siapkan ±30 menit sebelum dipak
 3. Tempel perintah ini:
    ```bash
    rm -rf ~/.poetify-sandbox Final_Project_Scalable   # sisa sesi lama (hanya di awal sesi baru)
-   git clone -b feat/sandbox-deploy https://github.com/satyawirapramudita/Final_Project_Scalable
+   git clone https://github.com/satyawirapramudita/Final_Project_Scalable
    cd Final_Project_Scalable
-   BRANCH=feat/sandbox-deploy bash deploy/sandbox/deploy.sh buat
+   bash deploy/sandbox/deploy.sh buat
    ```
 4. Biarkan tab terbuka sampai selesai. Pesan `mode group ditolak ... InvalidArgument` **normal**:
    skrip lanjut sendiri memakai mode `split`.
@@ -56,18 +56,18 @@ apa pun, dan tidak perlu kredensial orang lain. Siapkan ±30 menit sebelum dipak
 
 **Bila terputus di tengah jalan** (CloudShell tertutup atau error): **jangan** jalankan `buat` lagi,
 karena akan membuat 3 server tambahan. Masuk ke folder proyek, lalu jalankan langkah yang belum
-selesai satu per satu, selalu dengan `BRANCH=feat/sandbox-deploy`:
+selesai satu per satu:
 
 ```bash
-cd ~/Final_Project_Scalable && export BRANCH=feat/sandbox-deploy
+cd ~/Final_Project_Scalable
 bash deploy/sandbox/deploy.sh tunggu     # lalu: kbbi, cdn, seed, uji, info
 ```
 
 Bila gagal di langkah `server` (server belum lengkap): `bash deploy/sandbox/deploy.sh hapus`, lalu ulangi
 dari langkah 3.
 
-Variabel `BRANCH` menentukan branch yang di-clone **di server** (bawaan `main`). Setelah branch ini
-di-merge ke `main`, `-b ...` dan `BRANCH=...` tidak diperlukan lagi.
+Server men-clone `main`. Untuk mencoba branch lain: clone dengan `-b <branch>` dan jalankan dengan
+`BRANCH=<branch>`.
 
 **Perpanjang sesi:** klik **Start Lab** lagi sebelum timer 0:00 (terutama saat uji beban), atau semua
 sumber daya hilang. Rahasia (password DB, JWT, cookie Erlang, password Grafana) dibuat acak per sesi di
