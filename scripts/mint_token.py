@@ -15,8 +15,14 @@ Atau lokal (butuh PyJWT terpasang):
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
-from shared.security import create_token
+# Skrip ini bisa dijalankan langsung (`python scripts/mint_token.py`), dan
+# sys.path[0] saat itu adalah folder scripts/, bukan akar repo — sehingga
+# `shared` tidak terimport. Tambahkan akar repo ke sys.path secara eksplisit.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from shared.security import create_token  # noqa: E402
 
 
 def main() -> None:

@@ -547,3 +547,15 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --force-re
 - [ ] Backup manual berhasil
 - [ ] (Opsional) generator gambar menampilkan preview
 - [ ] Screenshot dashboard + hasil uji beban untuk laporan
+
+---
+
+## 16. Uji beban dan failover
+
+Setelah aplikasi hidup, jalankan uji beban dan uji kegagalan memakai
+`loadtest/aws_stress.js`. Panduan lengkap, termasuk skenario, perintah, metrik,
+dan template hasil ada di [`docs/Stress-Test-AWS.md`](Stress-Test-AWS.md).
+
+Untuk sesi demo kelas singkat (±5 menit) dengan skenario "poem mati → wordcloud
+503, search tetap hidup", ikuti runbook siap-pakai di
+[`docs/Demo-Kelas-AWS.md`](Demo-Kelas-AWS.md).
