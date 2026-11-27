@@ -16,7 +16,12 @@
 # (lihat docs/deploy-aws-tutorial.md bagian "Mengganti password volume lama").
 set -eu
 
-mysql --protocol=socket -uroot -p"${MYSQL_ROOT_PASSWORD}" <<SQL
+# Container mysql memuat .env (env_file), yang berisi MYSQL_HOST untuk layanan lain
+# (mis. "mysql" atau IP server data). Klien mysql memakai MYSQL_HOST sebagai host bawaan,
+# dan host non-lokal bertabrakan dengan --protocol=socket ("ERROR 2047 Wrong or unknown
+# protocol"): ALTER USER gagal diam-diam dan user tetap memakai password contoh.
+# -hlocalhost memaksa koneksi ke server sementara lewat socket.
+mysql --protocol=socket -hlocalhost -uroot -p"${MYSQL_ROOT_PASSWORD}" <<SQL
 ALTER USER 'auth_user'@'%'      IDENTIFIED BY '${AUTH_DB_PASSWORD}';
 ALTER USER 'poem_user'@'%'      IDENTIFIED BY '${POEM_DB_PASSWORD}';
 ALTER USER 'wordcloud_user'@'%' IDENTIFIED BY '${WORDCLOUD_DB_PASSWORD}';
