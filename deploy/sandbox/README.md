@@ -73,6 +73,25 @@ Server men-clone `main`. Untuk mencoba branch lain: clone dengan `-b <branch>` d
 sumber daya hilang. Rahasia (password DB, JWT, cookie Erlang, password Grafana) dibuat acak per sesi di
 `~/.poetify-sandbox/secrets.env`.
 
+### Alternatif: serahkan kredensial lab ke asisten AI
+
+Tidak mau mengetik sendiri? Asisten AI yang **bisa menjalankan perintah di laptopmu** (mis. Claude
+Code) bisa melakukan deploy. Chatbot di browser biasa tidak bisa. Cara ini yang dipakai untuk uji
+27 Nov (Windows, Git Bash).
+
+1. Clone repo ini di laptop dan buka foldernya di asisten AI.
+2. Di halaman lab: **Start Lab**, klik **AWS Details**, tampilkan **AWS CLI**, salin isinya.
+3. Tempel ke asisten dengan pesan seperti:
+   > Ini kredensial AWS Sandbox saya. Baca deploy/sandbox/README.md, lalu deploy Poetify. Jangan buat
+   > server ganda, dan beri tahu saya alamat CloudFront-nya.
+
+   Laptop perlu AWS CLI, Git Bash, dan Python; minta asisten memasang yang belum ada.
+4. Biarkan laptop menyala dan tersambung sampai selesai.
+
+**Hati-hati:** kredensial itu memberi akses ke akun lab-mu selama sesinya aktif. Berikan hanya ke alat
+yang kamu percaya, jangan kirim di grup chat, jangan commit ke repo, dan pastikan aturan kelas
+mengizinkannya.
+
 Yang dikerjakan `buat`, berurutan (masing-masing juga bisa dijalankan sendiri):
 
 | Perintah | Isi | Waktu |
