@@ -35,16 +35,19 @@ function setToken(token) {
 }
 
 // ─── Retry + backoff + jitter + idempotency ──────────────────────────────────
-// GET aman di-retry. POST submit puisi di-retry dengan Idempotency-Key yang
-// sama — backend menjamin retry tidak menduplikasi puisi (replay respons
-// pertama). Method lain (auth, PUT, DELETE) tidak pernah di-retry otomatis.
+// GET aman di-retry. Request yang mengubah puisi (POST/PUT/DELETE ke /poems)
+// membawa Idempotency-Key dan ikut di-retry dengan key yang sama — backend
+// menjamin retry tidak menduplikasi efeknya (replay respons pertama).
+// Request auth (login, register, logout) tidak pernah di-retry otomatis.
 const RETRY_MAX_ATTEMPTS = 3;
 const RETRYABLE_STATUS = new Set([502, 503, 504]);
+const IDEMPOTENT_METHODS = new Set(["POST", "PUT", "DELETE"]);
 
-// Key idempotency untuk satu submission: dipakai ulang di semua retry sampai
-// ada respons definitif, sehingga retry klien maupun kirim ulang manual tidak
-// pernah menghasilkan puisi ganda.
-let _submitIdempotencyKey = null;
+// Key idempotency per operasi (method + path + isi): dipakai ulang di semua
+// retry sampai ada respons definitif, sehingga retry klien maupun kirim ulang
+// manual atas operasi yang SAMA tidak pernah berefek ganda. Operasi dengan isi
+// berbeda (mis. form diubah setelah gagal) mendapat key baru, bukan 409.
+const _pendingIdempotencyKeys = new Map();
 
 function newIdempotencyKey() {
     if (window.crypto && typeof window.crypto.randomUUID === "function") {
@@ -63,14 +66,17 @@ function backoffDelayMs(attempt) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function api(path, method = "GET", body = null) {
-    const isSubmit = method === "POST" && path === "poems";
-    const canRetry = method === "GET" || isSubmit;
+    const isPoemWrite = IDEMPOTENT_METHODS.has(method) && /^poems(\/|$)/.test(path);
+    const canRetry = method === "GET" || isPoemWrite;
     const headers = {};
     const token = getToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
     if (body !== null) headers["Content-Type"] = "application/json";
-    if (isSubmit && !_submitIdempotencyKey) _submitIdempotencyKey = newIdempotencyKey();
-    if (isSubmit) headers["Idempotency-Key"] = _submitIdempotencyKey;
+    const opKey = isPoemWrite ? `${method} ${path} ${JSON.stringify(body)}` : null;
+    if (isPoemWrite) {
+        if (!_pendingIdempotencyKeys.has(opKey)) _pendingIdempotencyKeys.set(opKey, newIdempotencyKey());
+        headers["Idempotency-Key"] = _pendingIdempotencyKeys.get(opKey);
+    }
 
     for (let attempt = 1; attempt <= RETRY_MAX_ATTEMPTS; attempt++) {
         const options = { method, headers };
@@ -82,9 +88,9 @@ async function api(path, method = "GET", body = null) {
                 continue;
             }
             const data = await res.json().catch(() => ({}));
-            if (isSubmit && !RETRYABLE_STATUS.has(res.status)) {
+            if (isPoemWrite && !RETRYABLE_STATUS.has(res.status)) {
                 // Respons definitif (2xx maupun 4xx seperti 409/401): key selesai dipakai.
-                _submitIdempotencyKey = null;
+                _pendingIdempotencyKeys.delete(opKey);
             }
             // 5xx retryable yang habis attempt dan network error: key DIPERTAHANKAN —
             // request bisa jadi sudah sampai server, kirim ulang manual akan

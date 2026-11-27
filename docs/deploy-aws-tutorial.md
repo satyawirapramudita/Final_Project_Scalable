@@ -83,7 +83,8 @@ Inbound rules:
 | Port | Source | Untuk |
 |---|---|---|
 | 22 (SSH) | **My IP** | akses admin |
-| 80 (HTTP) | `0.0.0.0/0` | origin CloudFront (persempit setelah CF dibuat, lihat catatan) |
+| 80 (HTTP) | `0.0.0.0/0` | origin CloudFront, gateway-a (persempit setelah CF dibuat, lihat catatan) |
+| 81 (HTTP) | prefix list CloudFront | origin kedua CloudFront, gateway-b (langkah 10.4b) |
 
 Jangan membuka 3306, 6379, 5672, 15672, 9090, 3001.
 
@@ -105,7 +106,7 @@ Konsol: **EC2 → Launch instance**
 |---|---|
 | Name | `puisi-app` |
 | AMI | **Ubuntu Server 24.04 LTS** |
-| Instance type | **t3.large** (8 GB) — `t3.medium` cukup untuk demo trafik rendah |
+| Instance type | **t3.large** (8 GB) — `t3.medium` cukup untuk demo trafik rendah. Stack lengkap (2 gateway, 2 replika per layanan, klaster RabbitMQ 3 node) memakai ±2,2 GiB saat idle |
 | Key pair | `puisi-key` |
 | Network | VPC default, **Auto-assign public IP: Enable** |
 | Security group | `puisi-sg` |
@@ -313,6 +314,34 @@ Konsol: **CloudFront → Create distribution**
 | Allowed HTTP methods | GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE |
 | Cache policy | **CachingDisabled** |
 | Origin request policy | **AllViewerExceptHostHeader** |
+
+### 10.4b Origin failover ke gateway-b (Hands-On 3, titik kritis 1)
+EC2 menjalankan dua gateway identik: gateway-a di port 80 dan gateway-b di
+port 81 (`docker-compose.prod.yml`). Buka port 81 di Security Group dengan
+source prefix list CloudFront yang sama dengan port 80 (langkah 3.2).
+
+1. **Origins → Create origin**: domain `<EIP>`, **HTTP only**, HTTP port **81**,
+   name `ec2-api-b`.
+2. Edit origin `ec2-api` (gateway-a): **Connection attempts** `1`,
+   **Connection timeout** `3` detik. Default (3 × 10 dtk) membuat CloudFront
+   menunggu 30 dtk sebelum pindah.
+3. **Origins → Create origin group**: name `ec2-api-group`, origin
+   `ec2-api` (primary) lalu `ec2-api-b` (secondary), failover criteria
+   **500, 502, 503, 504**.
+4. Edit behavior `/api/*`: ganti **Origin** menjadi `ec2-api-group`.
+
+Uji: `docker stop puisi-gateway` di EC2, lalu
+`curl -s -o /dev/null -w '%{http_code}\n' "https://<CF-DOMAIN>/api/search?q=a" -H "Authorization: Bearer $TOKEN"`
+harus tetap 200. Jalankan lagi `docker start puisi-gateway` setelahnya.
+
+> **Batasan CloudFront:** failover hanya berlaku untuk request **GET, HEAD, dan
+> OPTIONS** ([dokumentasi AWS](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/high_availability_origin_failover.html)).
+> POST/PUT/DELETE tetap dikirim ke gateway-a saja; bila gateway-a mati, request
+> tulis gagal 502/504. Frontend mengulang request tulis puisi dengan
+> Idempotency-Key yang sama, sehingga pengulangan setelah gateway-a pulih (autoheal
+> me-restart container unhealthy) tidak membuat data ganda. Kedua gateway juga
+> berada di satu EC2: ini melindungi dari kegagalan proses/container Nginx,
+> bukan kegagalan instance.
 
 ### 10.5 (Opsional) Behavior `/fungsi*` untuk Lambda
 Lihat langkah 11. Bila Lambda belum siap, lewati dulu.

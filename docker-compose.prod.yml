@@ -7,3 +7,9 @@ services:
     # (berguna untuk smoke test lokal) dan ditutup lewat Security Group.
     ports:
       - "80:80"
+  gateway-b:
+    # Origin kedua CloudFront origin group (lihat docs/deploy-aws-tutorial.md,
+    # bagian origin failover). Buka port 81 di Security Group hanya untuk
+    # prefix list CloudFront, sama seperti port 80.
+    ports:
+      - "81:80"
