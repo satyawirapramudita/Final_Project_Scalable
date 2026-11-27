@@ -37,7 +37,15 @@ TYPE="${INSTANCE_TYPE:-t3.small}"
 # Dataset KBBI V (tidak disimpan di repo). URL dipaku ke satu commit agar isinya tidak berubah;
 # versi dataset sama dengan yang dipakai tim secara lokal.
 KBBI_URL="${KBBI_URL:-https://raw.githubusercontent.com/aryakdaniswara/kbbi-dataset-kbbi-v/27b7dc6ba208eecd771354f4d0bc069091e4f4a9/csv/kbbi_v.csv}"
-KBBI_VERSION="${KBBI_VERSION:-kbbi-v-27b7dc6}"
+# Bawaan: CSV diringkas di server (kbbi_ringkas.py) agar import lebih cepat. KBBI_UTUH=1 mengimpor
+# seluruhnya. Pakai nilai yang sama untuk `server` dan `kbbi`: versi dataset ditulis ke .env server.
+if [ "${KBBI_UTUH:-0}" = 1 ]; then
+  KBBI_VERSION="${KBBI_VERSION:-kbbi-v-27b7dc6}"; KBBI_ENTRI=113198
+  KBBI_SARING="mv /tmp/kbbi_asli.csv /tmp/kbbi_v.csv"
+else
+  KBBI_VERSION="${KBBI_VERSION:-kbbi-v-27b7dc6-ringkas}"; KBBI_ENTRI=71737
+  KBBI_SARING="python3 -I deploy/sandbox/kbbi_ringkas.py /tmp/kbbi_asli.csv /tmp/kbbi_v.csv"
+fi
 TAG="poetify-sandbox"
 STATE="${HOME}/.poetify-sandbox"          # rahasia + ID sumber daya (per sesi)
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -287,10 +295,10 @@ PY
 }
 
 kbbi() {
-  langkah "Import dataset KBBI ($KBBI_VERSION) di latar belakang (±45 menit; aplikasi sudah bisa dipakai)"
+  langkah "Import dataset KBBI ($KBBI_VERSION) di latar belakang (aplikasi sudah bisa dipakai selagi berjalan)"
   # Diunduh langsung oleh app-1 (tidak lewat laptop/CloudShell); importer berjalan dalam
   # container kbbi-linker sekali pakai dan menulis ke MySQL di server data. Importer menyisipkan
-  # baris satu per satu (±113 ribu entri, puluhan menit di t3.small), jadi dijalankan di latar
+  # baris satu per satu (puluhan menit di t3.small), jadi dijalankan di latar
   # belakang agar deploy tidak tertahan.
   # - Label autoheal=false: container import mewarisi healthcheck kbbi-linker (/health) yang
   #   tidak dilayani importer; tanpa label itu autoheal me-restart-nya tiap ±1 menit dan import
@@ -304,12 +312,13 @@ cat > /opt/poetify/kbbi-import.sh <<'SH'
 set -e
 cd /opt/poetify
 echo \"mulai \$(date -u +%FT%TZ)\"
-curl -fsSL '$KBBI_URL' -o /tmp/kbbi_v.csv
+curl -fsSL '$KBBI_URL' -o /tmp/kbbi_asli.csv
+$KBBI_SARING
 docker compose -f docker-compose.yml -f deploy/sandbox/app.yml run --rm --no-deps -T -l autoheal=false \
   -v /tmp/kbbi_v.csv:/data/kbbi.csv:ro kbbi-linker \
   python scripts/import_kbbi_csv.py /data/kbbi.csv --version '$KBBI_VERSION'
 docker compose exec -T kbbi-linker python -c 'import os, redis; r = redis.Redis(host=os.environ[\"REDIS_HOST\"], port=int(os.environ.get(\"REDIS_PORT\", 6379))); n = sum(r.delete(k) for k in r.scan_iter(\"kbbi:missing:*\")); print(\"negative cache dibersihkan:\", n)'
-rm -f /tmp/kbbi_v.csv
+rm -f /tmp/kbbi_asli.csv /tmp/kbbi_v.csv
 echo \"SELESAI \$(date -u +%FT%TZ)\"
 SH
 chmod +x /opt/poetify/kbbi-import.sh
@@ -320,7 +329,7 @@ sleep 2; echo 'import berjalan; log: /var/log/poetify-kbbi.log'"
 kbbi_status() {
   ssm "$(baca app1)" "tail -3 /var/log/poetify-kbbi.log 2>/dev/null || echo 'log import belum ada (jalankan: bash $0 kbbi)'"
   ssm "$(baca data)" "cd /opt/poetify; R=\$(grep ^MYSQL_ROOT_PASSWORD= .env | cut -d= -f2)
-docker exec puisi-mysql mysql -uroot -p\"\$R\" -hlocalhost -N -e \"SELECT CONCAT(COUNT(*), ' dari ±113198 entri') FROM kbbi_db.kbbi_entries WHERE dataset_version = '$KBBI_VERSION'\" 2>/dev/null"
+docker exec puisi-mysql mysql -uroot -p\"\$R\" -hlocalhost -N -e \"SELECT CONCAT(COUNT(*), ' dari ±$KBBI_ENTRI entri') FROM kbbi_db.kbbi_entries WHERE dataset_version = '$KBBI_VERSION'\" 2>/dev/null"
 }
 
 seed() {
