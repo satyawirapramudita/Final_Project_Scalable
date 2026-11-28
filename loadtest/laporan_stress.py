@@ -17,7 +17,7 @@ from collections import defaultdict
 BATAS_P95_MS = 1000.0
 BATAS_ERROR = 0.01
 URUTAN = ["baseline", "ramp-20", "ramp-40", "ramp-80", "ramp-160", "ramp-320",
-          "jeda", "spike", "pulih", "gagal"]
+          "jeda", "spike", "pulih"]
 
 
 def persentil(nilai: list[float], p: float) -> float:
@@ -96,19 +96,6 @@ def main() -> None:
         else:
             print(f"Pulih dari spike: ±{(max(buruk) + 1) * args.jendela} detik "
                   "(termasuk 10 detik penurunan beban).")
-
-    if fase.get("gagal"):
-        data = fase["gagal"]
-        error = [b for b in data if not 200 <= b[2] < 300]
-        cari = [b for b in data if b[3] == "GET /api/search"]
-        gagal_cari = sum(1 for b in cari if not 200 <= b[2] < 300)
-        if error:
-            lama = max(b[0] for b in error) - min(b[0] for b in error) + 1
-            print(f"Satu dari dua replika poem dimatikan: {len(error)} dari {len(data)} request gagal "
-                  f"({len(error) / len(data):.2%}) dalam rentang ±{lama} detik; "
-                  f"search gagal {gagal_cari} dari {len(cari)}.")
-        else:
-            print(f"Satu dari dua replika poem dimatikan: 0 dari {len(data)} request gagal.")
 
     print("\nPer endpoint (seluruh uji):")
     per: dict[str, list[tuple]] = defaultdict(list)

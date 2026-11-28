@@ -14,7 +14,7 @@
 //   PROFILE=soak  VUS=50 SOAK_DURATION=30m
 //   PROFILE=mixed VUS=40 DURATION=5m IDS=12,13,14
 //   PROFILE=write VUS=20 DURATION=3m WRITE_RATIO=0.8
-//   PROFILE=kelas IDS=12,13,14   (7,5 menit: baseline, ramp, spike, pulih, 1 replika poem mati;
+//   PROFILE=kelas IDS=12,13,14   (6 menit: baseline, ramp, spike, pulih;
 //                                 jalankan lewat loadtest/kelas.sh)
 //
 // Token: pakai TOKEN (satu) atau TOKENS (dipisah koma) untuk banyak pengguna.
@@ -82,8 +82,6 @@ const KELAS = [
   [60, 300, 'spike'],
   [10, 10, 'pulih'],
   [30, 10, 'pulih'],
-  [10, 20, 'transisi'],
-  [80, 20, 'gagal'], // loadtest/kelas.sh mematikan 1 dari 2 replika poem di fase ini
 ];
 
 function faseSekarang() {

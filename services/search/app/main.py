@@ -96,7 +96,10 @@ async def observe_requests(request: Request, call_next):
 
 
 @app.get("/health")
-def health() -> dict:
+async def health() -> dict:
+    # async: dijawab di event loop, tidak ikut antre di threadpool bersama pencarian.
+    # Saat beban tinggi semua thread menunggu database; health yang ikut antre
+    # akan timeout, lalu autoheal merestart service yang sebenarnya hanya sibuk.
     return {"status": "ok", "service": config.SERVICE_NAME}
 
 

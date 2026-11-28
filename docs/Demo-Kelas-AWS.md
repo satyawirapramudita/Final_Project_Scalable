@@ -1,8 +1,7 @@
-# Demo Kelas — Stress Test di AWS (7,5 menit beban, <10 menit total)
+# Demo Kelas — Stress Test di AWS (6 menit beban, ±8 menit total)
 
 Stress test di sini berarti sengaja "menyerang" sistem sendiri dengan beban terukur, untuk melihat
 **kapan mulai kewalahan, berapa banyak pengguna yang sanggup ditampung, dan berapa lama pulih**.
-Ditutup dengan satu kegagalan: satu dari dua replika layanan poem dimatikan saat beban berjalan.
 
 Target SLO: [`docs/slo.md`](slo.md). Uji lain: [`docs/Stress-Test-AWS.md`](Stress-Test-AWS.md).
 
@@ -112,19 +111,18 @@ grep GRAFANA ~/.poetify-sandbox/secrets.env        # password (jalankan di jende
 Buka http://localhost:3000, login `admin`. Lewati saja bila tidak lancar; uji tidak membutuhkannya.
 (Grafana di sandbox belum pernah dicoba saat gladi.)
 
-### B6. Jalankan stress test (giliranmu, <10 menit)
+### B6. Jalankan stress test (giliranmu, ±8 menit)
 
 ```bash
 cd ~/Final_Project_Scalable
 bash loadtest/kelas.sh
 ```
 
-Hanya itu. Skrip menyiapkan token, menaikkan rate limit, menjalankan 2 replika poem di app-1,
-menjalankan semua fase, mematikan dan menyalakan satu replika, menunggu antrean terkuras, mencetak ringkasan, lalu mengembalikan pengaturan.
+Hanya itu. Skrip menyiapkan token, menaikkan rate limit, menjalankan semua fase, menunggu antrean
+terkuras, mencetak ringkasan, lalu mengembalikan rate limit.
 
-- ±2 menit pertama hanya persiapan, dan seluruh skrip ±9 menit 55 detik. Jalankan sebelum giliran.
-- Layar k6 diam selama beban berjalan; jelaskan fase memakai tabel di bagian 1. Baris `INJEKSI` dan
-  `PULIHKAN` muncul sendiri.
+- ±1½ menit pertama hanya persiapan; seluruh skrip ±8 menit. Boleh dijalankan sedikit sebelum giliran.
+- Layar k6 diam selama beban berjalan; jelaskan fase memakai tabel di bagian 1.
 - **Jalankan sekali saja per deploy.** Sisa data uji membuat run berikutnya lebih lambat.
 - Jangan unduh atau streaming apa pun di laptop: beban dikirim dari laptop ini.
 
@@ -169,15 +167,14 @@ RabbitMQ ke nlp-worker, wordcloud, kbbi-linker, dan search).
 | 3:50–4:10 | `jeda` | 10 | |
 | 4:10–5:20 | `spike` | melonjak ke 300 | Tahan lonjakan mendadak? |
 | 5:20–6:00 | `pulih` | 10 | Berapa lama pulih |
-| 6:00–7:30 | `gagal` | 20; 1 dari 2 replika poem di app-1 mati ±45 dtk mulai ±6:20 | Tahan kehilangan satu replika? |
 
 - **VU (virtual user)** mengirim request terus-menerus tanpa jeda, jauh lebih agresif daripada orang
   sungguhan; jangan disebut "320 pengguna asli".
 - VU bergantian memakai **50 identitas uji** (token dibuat langsung, bukan akun terdaftar), jadi login
   dan registrasi tidak ikut diuji. Puisi contoh milik user 99.
-- Tidak diuji: login, ubah/hapus puisi, matinya node RabbitMQ atau gateway.
+- Tidak diuji di sini: login, ubah/hapus puisi, dan matinya layanan. Kegagalan layanan diuji terpisah
+  ([`Laporan-Uji-Produksi-Sandbox.md`](Laporan-Uji-Produksi-Sandbox.md)); demo manual di bagian 5.
 - Rate limit gateway app-1 dinaikkan selama uji; tanpa itu yang terukur adalah limiter.
-- Poem di app-1 dijalankan **2 replika** selama uji (deploy bawaan: 1); sebutkan ini saat demo.
 
 ---
 
@@ -187,22 +184,18 @@ RabbitMQ ke nlp-worker, wordcloud, kbbi-linker, dan search).
   300 ms karena k6 di laptop ikut mengukur perjalanan ke `us-east-1`; sebutkan itu saat demo.
 - **Pulih dari spike:** sejak fase `pulih` sampai p95 dan error kembali di bawah ambang. Angka ±10
   detik berarti pulih begitu beban turun (penurunannya sendiri 10 detik).
-- **Satu replika poem dimatikan:** yang diharapkan 0 request gagal, karena replika kedua melayani.
-  Bila ada yang gagal, sebutkan jumlahnya. Ini bukan bukti bahwa sistem tahan bila **semua** replika
-  poem mati: daftar/submit puisi, wordcloud, dan kbbi bergantung pada poem (`auth_request`).
 - **Integritas:** semua puisi yang tersimpan sudah `done`, outbox 0, antrean 0, DLQ 0.
 - Bila CPU **kedua** server (app-1 dan data) rendah tetapi throughput mentok, yang mentok laptop atau
   jaringannya.
-- **Lambat di 160 VU ke atas itu wajar** (sudah melewati titik jenuh). Endpoint yang paling lambat bisa
-  berbeda antar-run: search, atau daftar/submit puisi. Jawaban singkat bila ditanya: "Server database
-  hanya 2 vCPU dan dipakai bersama Redis dan RabbitMQ, jadi request mengantre: melambat, bukan gagal,
-  dan pulih saat beban turun."
+- **Lambat di 160 VU ke atas itu wajar** (sudah melewati titik jenuh). Pada gladi, daftar dan submit
+  puisi yang paling lambat (poem), sedangkan search tetap cepat (p95 ±0,7 detik). Jawaban singkat bila
+  ditanya: "Layanan poem jenuh lebih dulu, jadi request mengantre: melambat, bukan gagal, dan pulih
+  saat beban turun."
 
 **Satu kalimat kesimpulan demo** (isi dengan angka run-mu sendiri):
 
 > "Sistem masih sehat sampai … VU (… req/s) dan mulai kewalahan di … VU; setelah lonjakan 300 VU
-> pulih dalam … detik. Saat satu dari dua replika poem dimatikan, … request gagal, dan tidak ada puisi
-> yang hilang."
+> pulih dalam … detik, tanpa request gagal dan tanpa puisi yang hilang."
 
 ---
 
@@ -212,14 +205,13 @@ RabbitMQ ke nlp-worker, wordcloud, kbbi-linker, dan search).
 |---|---|
 | Masih sehat | 80 VU |
 | Mulai kewalahan | 160 VU |
-| Throughput tertinggi | 222 req/s |
-| Pulih dari spike | ±15 s |
-| 1 dari 2 replika poem mati: request gagal | 0 dari 5230 |
+| Throughput tertinggi | 217 req/s |
+| Pulih dari spike | ±10 s |
+| Request gagal | 0 |
 | Data tertinggal | tidak ada |
-| Total waktu skrip | ±9 menit 55 detik |
+| Total waktu skrip | ±8 menit |
 
-Bottleneck: CPU server data (MySQL, Redis, dan RabbitMQ berbagi 2 vCPU); pada gladi ini yang paling
-lambat search. Rincian: [`Laporan-Stress-Test-Sandbox.md`](Laporan-Stress-Test-Sandbox.md).
+Bottleneck pertama: layanan poem; batas di belakangnya CPU server data. Rincian: [`Laporan-Stress-Test-Sandbox.md`](Laporan-Stress-Test-Sandbox.md).
 Satu kali uji; harapkan angka yang sedikit berbeda.
 
 ---
@@ -232,7 +224,7 @@ Satu kali uji; harapkan angka yang sedikit berbeda.
 | `ExpiredToken` / `UnauthorizedOperation` | Kredensial lama: ulangi B1 (sesi lab masih hidup?) |
 | `/health tidak menjawab` | Sesi lab habis atau IP berubah; cek `bash deploy/sandbox/deploy.sh info` |
 | Banyak 429 di tabel | Rate limit gagal dinaikkan; cek `/opt/poetify/.env` di app-1 |
-| Skrip dihentikan (Ctrl+C) | Skrip memulihkan poem dan rate limit sendiri; pastikan dengan `bash deploy/sandbox/deploy.sh jalankan app-1 'docker ps'` |
+| Skrip dihentikan (Ctrl+C) | Skrip memulihkan rate limit sendiri; pastikan dengan `bash deploy/sandbox/deploy.sh jalankan app-1 'docker ps'` |
 | Antrean belum terkuras setelah 5 menit | Catat sebagai temuan (analisis tertinggal di belakang submit) |
 | Waktu demo tidak cukup | Putar rekaman gladi |
 
@@ -242,8 +234,8 @@ Satu kali uji; harapkan angka yang sedikit berbeda.
 
 ## 5. Tambahan manual (bila ditanya)
 
-**Mematikan poem sendiri.** Di luar uji hanya ada satu replika, jadi perintah ini membuat fitur yang
-bergantung pada poem gagal. `docker compose start` gagal di server aplikasi ("missing dependency
+**Mematikan poem sendiri.** Hanya ada satu replika per server, jadi perintah ini membuat daftar/submit
+puisi, wordcloud, dan kbbi di app-1 gagal sementara, sedangkan search tetap jalan. `docker compose start` gagal di server aplikasi ("missing dependency
 rabbit-2"), jadi nyalakan dengan `up -d --no-deps`:
 
 ```bash
@@ -273,11 +265,10 @@ Setiap baris tabel risiko kini punya bukti:
 | Titik kritis | Bukti (dari mana) | Dampak | Solusi terpasang |
 |---|---|---|---|
 | Gateway (SPOF) | Rehearsal lokal: kill → outage ±18 dtk; live AWS: origin group gateway-b | Total outage tanpa mitigasi | 2 gateway + CloudFront failover, autoheal |
-| Sync path (poem) | **Demo live** (`kelas.sh`); gladi 28 Nov: 1 dari 2 replika mati, 0 request gagal | Data turunan tak terjangkau | Replika poem, timeout 3 dtk, cache stale, breaker search |
+| Sync path (poem) | Uji terpisah: poem di app-1 dihentikan → wordcloud 503 di app-1, search tetap 200; stress test: poem jenuh pertama | Data turunan tak terjangkau | Replika poem, timeout 3 dtk, cache stale, breaker search |
 | Async (RabbitMQ) | Rehearsal: broker mati → outbox 5 pending → drain 0 | Tulis tetap sukses, async tertunda | Outbox + publisher confirms + quorum queue |
 | Data (MySQL) | Rehearsal: kill → RTO ±6 dtk, 5xx window | API DB gagal | Backup harian + S3, pool ping=1 |
 | Data (Redis) | Rehearsal: stop → idempotency fail-open → 2 baris | Duplikasi saat Redis mati | Breaker Redis; catat gap → Sentinel |
 | Observability | Rehearsal: `/health` 200 saat MySQL mati; alert Prometheus aktif | Deteksi manual | Alert rules (DLQ, outbox, breaker, 5xx) |
 
-Hasil demo live mengisi baris **Sync path** dengan angka AWS yang nyata
-(request gagal saat satu replika mati), sisanya dari bukti rehearsal.
+Stress test mengisi kapasitas dan bottleneck; baris lain dari uji ketahanan dan rehearsal.
