@@ -104,10 +104,11 @@ def main() -> None:
         gagal_cari = sum(1 for b in cari if not 200 <= b[2] < 300)
         if error:
             lama = max(b[0] for b in error) - min(b[0] for b in error) + 1
-            print(f"Poem dimatikan: error selama ±{lama} detik ({len(error)} request); "
+            print(f"Satu dari dua replika poem dimatikan: {len(error)} dari {len(data)} request gagal "
+                  f"({len(error) / len(data):.2%}) dalam rentang ±{lama} detik; "
                   f"search gagal {gagal_cari} dari {len(cari)}.")
         else:
-            print("Poem dimatikan: tidak ada request gagal (periksa apakah injeksi berjalan).")
+            print(f"Satu dari dua replika poem dimatikan: 0 dari {len(data)} request gagal.")
 
     print("\nPer endpoint (seluruh uji):")
     per: dict[str, list[tuple]] = defaultdict(list)

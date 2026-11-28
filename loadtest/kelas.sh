@@ -5,7 +5,7 @@
 #
 # Jalankan dari mesin yang dipakai untuk deploy (kredensial lab + ~/.poetify-sandbox),
 # dengan k6 terpasang (atau K6=/path/k6). Fase: baseline, ramp 20..320 VU, spike 300 VU,
-# pulih, lalu poem di app-1 dimatikan 30 detik. Beban: 50% search, 20% daftar puisi,
+# pulih, lalu SATU dari DUA replika poem di app-1 dimatikan 30 detik. Beban: 50% search, 20% daftar puisi,
 # 10% wordcloud, 10% kbbi, 10% submit. Hasil disimpan di loadtest/results/kelas-<waktu>/.
 set -euo pipefail
 export MSYS_NO_PATHCONV=1
@@ -24,6 +24,9 @@ langkah() { echo; echo "==== $(date +%H:%M:%S)  $* ===="; }
 jalan() { $DEPLOY jalankan "$1" "$2"; }
 skala() { "$PY" -c "print(max(1, round($1 * $SCALE)))" | tr -d '\r'; }
 C='cd /opt/poetify && docker compose -f docker-compose.yml -f deploy/sandbox/app.yml'
+# Replika kedua tidak bisa memakai port host 8002 yang sama (deploy/sandbox/app.yml menerbitkannya),
+# jadi port itu dilepas selama uji; Prometheus tetap menjangkau poem lewat jaringan Docker.
+C2='cd /opt/poetify; printf "services:\n  poem:\n    ports: !reset []\n" > /tmp/poem2.yml; docker compose -f docker-compose.yml -f deploy/sandbox/app.yml -f /tmp/poem2.yml'
 SQL='R=$(grep ^MYSQL_ROOT_PASSWORD= /opt/poetify/.env | cut -d= -f2-); docker exec puisi-mysql mysql -uroot -p"$R" -hlocalhost -N -e'
 
 # Mencetak "total done outbox antrean dlq" untuk puisi yang dibuat uji beban.
@@ -54,7 +57,7 @@ pulihkan() {
   # Penting: matikan pengatur waktu injeksi, agar poem tidak dimatikan setelah skrip berhenti.
   if [[ -n "${INJEKSI:-}" ]]; then kill "$INJEKSI" 2>/dev/null || true; fi
   langkah "Memulihkan poem dan rate limit"
-  jalan app-1 "$C up -d --no-deps poem >/dev/null 2>&1
+  jalan app-1 "$C up -d --no-deps --force-recreate --scale poem=1 poem >/dev/null 2>&1
 cd /opt/poetify; if [ -f .env.sebelum-stress ]; then mv .env.sebelum-stress .env; fi
 docker compose -f docker-compose.yml -f deploy/sandbox/app.yml up -d --no-deps --force-recreate gateway >/dev/null 2>&1 && echo dipulihkan" \
     || echo "GAGAL memulihkan: periksa poem dan gateway di app-1"
@@ -67,17 +70,26 @@ echo "menaikkan rate limit gateway app-1 selama uji (dikembalikan di akhir)"
 jalan app-1 "cd /opt/poetify && cp -n .env .env.sebelum-stress; sed -i '/^API_RATE_LIMIT=/d;/^API_BURST=/d' .env && printf 'API_RATE_LIMIT=100000r/s\nAPI_BURST=100000\n' >> .env && docker compose -f docker-compose.yml -f deploy/sandbox/app.yml up -d --no-deps --force-recreate gateway >/dev/null 2>&1" >/dev/null
 for _ in $(seq 30); do curl -fsS -m 5 "$BASE/health" >/dev/null 2>&1 && break; sleep 2; done
 
+echo "menjalankan 2 replika poem di app-1 (dikembalikan ke 1 di akhir)"
+SIAP="$(jalan app-1 "$C2 up -d --no-deps --force-recreate --scale poem=2 poem >/dev/null 2>&1; for i in \$(seq 60); do n=\$(docker ps -q --filter name=puisi-scalable-poem- --filter health=healthy | wc -l); [ \$n -ge 2 ] && break; sleep 2; done; echo replika_sehat=\$n")"
+[[ "$SIAP" == *replika_sehat=2* ]] || { echo "2 replika poem tidak sehat: $SIAP"; exit 1; }
+sleep 5
+
 read -r SEBELUM _ <<< "$(hitung)"
 [[ -n "$SEBELUM" ]] || { echo "tidak bisa membaca database di server data"; exit 1; }
 
 langkah "Beban dimulai (±$(skala 450) detik)"
+MULAI_BEBAN=$SECONDS
 (
-  sleep "$(skala 380)"
-  langkah "INJEKSI: stop poem di app-1"
-  jalan app-1 "$C stop poem >/dev/null 2>&1; echo poem mati"
+  sleep "$(skala 170)"
+  { echo "== app-1"; jalan app-1 "docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemPerc}}'"
+    echo "== data"; jalan data "docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemPerc}}'"; } > "$OUT/cpu-saat-ramp.txt" 2>&1 || true
+  sleep "$(( $(skala 380) - SECONDS + MULAI_BEBAN > 0 ? $(skala 380) - SECONDS + MULAI_BEBAN : 0 ))"
+  langkah "INJEKSI: matikan 1 dari 2 replika poem di app-1"
+  jalan app-1 "docker ps -q --filter name=puisi-scalable-poem- | head -1 > /tmp/poem_mati; docker stop \$(cat /tmp/poem_mati) >/dev/null; docker ps -a --filter name=puisi-scalable-poem- --format '{{.Names}} {{.Status}}'"
   sleep "$(skala 30)"
-  langkah "PULIHKAN: nyalakan poem"
-  jalan app-1 "$C up -d --no-deps poem >/dev/null 2>&1; echo poem dinyalakan"
+  langkah "PULIHKAN: nyalakan replika yang dimatikan"
+  jalan app-1 "docker start \$(cat /tmp/poem_mati) >/dev/null && echo replika dinyalakan"
 ) &
 INJEKSI=$!
 "$K6" run --log-output=file="$OUT/k6.log" -e PROFILE=kelas -e BASE_URL="$BASE" -e TOKENS="$TOKENS" -e IDS="$IDS" -e SCALE="$SCALE" \

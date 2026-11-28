@@ -556,5 +556,5 @@ Setelah aplikasi hidup, jalankan uji beban dan uji kegagalan memakai
 `loadtest/aws_stress.js`. Panduan lengkap, termasuk skenario, perintah, metrik,
 dan template hasil ada di [`docs/Stress-Test-AWS.md`](Stress-Test-AWS.md).
 
-Untuk **stress test demo kelas** (di AWS Academy Sandbox: ramp, spike, pulih, lalu poem dimatikan)
+Untuk **stress test demo kelas** (di AWS Academy Sandbox: ramp, spike, pulih, lalu satu dari dua replika poem dimatikan)
 pakai `bash loadtest/kelas.sh`, panduannya di [`docs/Demo-Kelas-AWS.md`](Demo-Kelas-AWS.md).
