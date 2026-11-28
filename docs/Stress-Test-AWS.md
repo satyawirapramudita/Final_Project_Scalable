@@ -1,5 +1,9 @@
 # Stress Test di AWS — Panduan Lengkap
 
+> **Untuk demo kelas di sandbox, pakai [`Demo-Kelas-AWS.md`](Demo-Kelas-AWS.md)** (satu perintah:
+> `bash loadtest/kelas.sh`). Deploy sandbox sudah mengisi 1000 puisi asli, jadi jangan jalankan
+> `publish_fake_events.py` di sana.
+
 Dokumen ini melengkapi `docs/deploy-aws-tutorial.md` dan `docs/slo.md`. Isinya cara
 menjalankan uji beban + uji kegagalan terhadap stack yang sudah di-deploy di AWS,
 mengumpulkan bukti, dan mengisi tabel analisis risiko.

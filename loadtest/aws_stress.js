@@ -14,6 +14,8 @@
 //   PROFILE=soak  VUS=50 SOAK_DURATION=30m
 //   PROFILE=mixed VUS=40 DURATION=5m IDS=12,13,14
 //   PROFILE=write VUS=20 DURATION=3m WRITE_RATIO=0.8
+//   PROFILE=kelas IDS=12,13,14   (7,5 menit: baseline, ramp, spike, pulih, poem mati;
+//                                 jalankan lewat loadtest/kelas.sh)
 //
 // Token: pakai TOKEN (satu) atau TOKENS (dipisah koma) untuk banyak pengguna.
 // Banyak token penting agar cache pencarian per pengguna tidak terlalu optimis.
@@ -23,6 +25,7 @@
 // (lihat docs/Stress-Test-AWS.md), lalu kembalikan setelah selesai.
 
 import http from 'k6/http';
+import exec from 'k6/execution';
 import { check } from 'k6';
 import { Counter, Rate } from 'k6/metrics';
 
@@ -68,6 +71,31 @@ function rampStages() {
   return stages;
 }
 
+// Profil kelas: [detik, VU tujuan, nama fase]. SCALE < 1 memendekkan semua durasi (untuk uji skrip).
+const SCALE = floatEnv('SCALE', 1);
+const KELAS = [
+  [30, 10, 'baseline'],
+  ...[20, 40, 80, 160, 320].flatMap((v) => [[10, v, 'transisi'], [30, v, `ramp-${v}`]]),
+  [10, 10, 'transisi'],
+  [10, 10, 'jeda'],
+  [10, 300, 'spike'],
+  [60, 300, 'spike'],
+  [10, 10, 'pulih'],
+  [30, 10, 'pulih'],
+  [10, 20, 'transisi'],
+  [80, 20, 'gagal'], // loadtest/kelas.sh mematikan poem di fase ini
+];
+
+function faseSekarang() {
+  let batas = 0;
+  const lewat = exec.instance.currentTestRunDuration / 1000;
+  for (const [detik, , nama] of KELAS) {
+    batas += Math.max(1, Math.round(detik * SCALE));
+    if (lewat < batas) return nama;
+  }
+  return 'selesai';
+}
+
 const strictThresholds = {
   http_req_duration: [`p(95)<${P95_MS}`, `p(99)<${P99_MS}`],
   http_req_failed: [`rate<${ERROR_RATE}`],
@@ -80,6 +108,22 @@ function optionsForProfile() {
   };
 
   switch (PROFILE) {
+    case 'kelas':
+      // Tanpa threshold: hasilnya dibaca per fase oleh loadtest/laporan_stress.py.
+      return {
+        ...base,
+        scenarios: {
+          kelas: {
+            executor: 'ramping-vus',
+            startVUs: 10,
+            stages: KELAS.map(([detik, target]) => ({
+              duration: `${Math.max(1, Math.round(detik * SCALE))}s`,
+              target,
+            })),
+            gracefulRampDown: '5s',
+          },
+        },
+      };
     case 'smoke':
       return { ...base, vus: 1, duration: '30s', thresholds: strictThresholds };
     case 'ramp':
@@ -139,7 +183,7 @@ function optionsForProfile() {
       };
     default:
       throw new Error(
-        `PROFILE tidak dikenal: ${PROFILE}. Pilih smoke|ramp|spike|soak|mixed|write`,
+        `PROFILE tidak dikenal: ${PROFILE}. Pilih kelas|smoke|ramp|spike|soak|mixed|write`,
       );
   }
 }
@@ -189,6 +233,7 @@ export default function (data) {
   const token = data.tokens[(__VU - 1) % data.tokens.length];
   const headers = { Authorization: `Bearer ${token}` };
 
+  if (PROFILE === 'kelas') return kelas(headers);
   if (PROFILE === 'write') return writeOrSearch(headers);
   if (PROFILE === 'mixed') return mixed(headers);
   return search(headers);
@@ -249,6 +294,17 @@ function mixed(headers) {
   if (IDS.length && roll < 0.9) return getWordcloud(headers);
   if (IDS.length) return getKbbi(headers);
   return search(headers);
+}
+
+// 50% search, 20% daftar puisi, 10% wordcloud, 10% kbbi, 10% submit.
+function kelas(headers) {
+  exec.vu.metrics.tags.fase = faseSekarang();
+  const roll = Math.random();
+  if (roll < 0.5) return search(headers);
+  if (roll < 0.7) return listPoems(headers);
+  if (roll < 0.8) return getWordcloud(headers);
+  if (roll < 0.9) return getKbbi(headers);
+  return submitPoem(headers);
 }
 
 function writeOrSearch(headers) {

@@ -30,6 +30,9 @@
 #   hapus          hapus semua yang dibuat skrip ini
 set -euo pipefail
 export MSYS_NO_PATHCONV=1   # Git Bash di Windows: jangan ubah argumen "/..." menjadi path Windows
+# Windows: installer Python hanya menyediakan `python`; `python3` bisa tidak ada atau berupa alias
+# Microsoft Store yang tidak jalan.
+if ! python3 -c "" >/dev/null 2>&1; then python3() { python "$@"; }; fi
 
 REGION="${AWS_REGION:-us-east-1}"
 REPO="${REPO:-https://github.com/satyawirapramudita/Final_Project_Scalable}"

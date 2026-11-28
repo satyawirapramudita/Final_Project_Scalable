@@ -118,6 +118,9 @@ http://localhost:3000.
 
 ## Uji beban dan demo failover
 
+**Stress test kelas** (satu perintah, `bash loadtest/kelas.sh`, dengan langkah lengkap tanpa AI):
+[`docs/Demo-Kelas-AWS.md`](../../docs/Demo-Kelas-AWS.md). Di bawah ini cara manual terpisah.
+
 - **Target:** alamat CloudFront (perilaku nyata pengguna) atau langsung `http://<IP publik app-1>`
   (tanpa CloudFront). Rate limit gateway sudah dinaikkan (`API_RATE_LIMIT=500r/s`) karena CloudFront
   meneruskan dari sedikit IP edge.
@@ -164,4 +167,5 @@ dipakai tercetak di `info`.
 ±10 menit: semua container sehat, uji ujung ke ujung 9/9 lulus lewat CloudFront dan app-2, pencarian
 tetap sampai ke layanan saat gateway-a dimatikan, dan KBBI ringkas (71.737 entri) selesai diimpor.
 Seed 1000 puisi lewat jalur submit asli
-dikirim dan dianalisis dalam 33 detik, tanpa pesan di DLQ. Jalur **CloudShell** pada panduan cepat belum dicoba. Uji beban k6 belum dijalankan di sandbox.
+dikirim dan dianalisis dalam 33 detik, tanpa pesan di DLQ. Jalur **CloudShell** pada panduan cepat belum dicoba. Stress test `loadtest/kelas.sh` dijalankan 28 Nov
+(angkanya di `docs/Demo-Kelas-AWS.md`).

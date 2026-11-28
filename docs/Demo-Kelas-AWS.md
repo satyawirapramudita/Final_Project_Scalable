@@ -1,267 +1,275 @@
-# Demo Kelas 5 Menit — Stress Test + Failover di AWS
+# Demo Kelas — Stress Test di AWS (7,5 menit beban, <10 menit total)
 
-Panduan untuk sesi demo singkat (±5 menit presentasi) **setelah deployment ke AWS**.
-Kasusnya sama dengan uji lokal: **saat layanan poem mati, wordcloud/kbbi ikut 503,
-tetapi search tetap hidup** — bukti cascading failure + pemulihan.
+Stress test di sini berarti sengaja "menyerang" sistem sendiri dengan beban terukur, untuk melihat
+**kapan mulai kewalahan, berapa banyak pengguna yang sanggup ditampung, dan berapa lama pulih**.
+Ditutup dengan satu kegagalan: layanan poem dimatikan saat beban berjalan.
 
-Referensi lengkap:
+Target SLO: [`docs/slo.md`](slo.md). Uji lain: [`docs/Stress-Test-AWS.md`](Stress-Test-AWS.md).
 
-- Detail uji beban: [`docs/Stress-Test-AWS.md`](Stress-Test-AWS.md)
-- Langkah deployment: [`docs/deploy-aws-tutorial.md`](deploy-aws-tutorial.md)
-- Target SLO: [`docs/slo.md`](slo.md)
-
----
-
-## 1. Kenapa skenario ini yang dipilih
-
-| Alasan | Penjelasan |
+| Bagian | Isi |
 |---|---|
-| Cepat | Injeksi 1 perintah, pulih 1 perintah, total < 90 detik |
-| Terlihat jelas | Probe tiap detik menampilkan `200 → 503 → 200` |
-| Nyambung dengan tugas | Langsung jadi baris **Tabel Analisis Risiko** (cascading failure) |
-| Aman | Tidak menyentuh MySQL/Redis/RabbitMQ; tidak ada risiko data |
-| Ada pembanding | Search tetap 200 pada beban yang sama |
-
-Hasil uji komponen lain (gateway, MySQL, Redis, RabbitMQ) **tidak perlu diulang
-live** — cukup tampilkan angka dari sesi uji lokal di slide/laporan.
+| [A](#a-sekali-saja-h-1) | Pasang alat (sekali saja, H-1) |
+| [B](#b-hari-demo-tanpa-ai) | **Hari demo tanpa AI** (jalur utama) |
+| [C](#c-alternatif-dengan-asisten-ai) | Alternatif dengan asisten AI |
+| 1–6 | Isi uji, cara membaca hasil, kegagalan, angka gladi |
 
 ---
 
-## 2. Checklist H-1 (sehari sebelum / sebelum masuk kelas)
+## A. Sekali saja (H-1)
 
-- [ ] Deployment selesai: `curl -s http://<ALB>/health` → `{"status":"ok","service":"gateway"}`
-- [ ] Register → login → submit → search → wordcloud → kbbi semua jalan
-- [ ] Data seed ada (mis. `publish_fake_events.py --count 1000`) dan ada puisi dianalisis
-- [ ] `.env` sudah diatur (lihat 2.1), gateway sudah direcreate
-- [ ] Backup MySQL: `BACKUP_S3=s3://<bucket>/backups bash deploy/backup-mysql.sh`
-- [ ] Token demo dibuat (lihat 2.2) dan disimpan di server
-- [ ] Grafana/Prometheus bisa diakses via SSH tunnel (untuk screenshot)
-- [ ] Semua container `healthy`: `docker compose -f ... ps`
-- [ ] Waktu demo sudah diuji sekali penuh (rehearsal) — catat angkanya
+Untuk laptop Windows. Buka **PowerShell**, jalankan satu per satu:
 
-### 2.1 Atur `.env` untuk demo
-
-```dotenv
-# Lonjakan beban datang dari IP ALB/CloudFront; rate limit default 20r/s
-# akan menolak hampir semua request k6 dengan 429.
-API_RATE_LIMIT=100000r/s
-API_BURST=100000
+```powershell
+winget install -e --id Git.Git
+winget install -e --id Python.Python.3.13
+winget install -e --id Amazon.AWSCLI
+winget install -e --id GrafanaLabs.k6
 ```
 
-Lalu recreate gateway (keduanya):
+Tutup PowerShell, buka **Git Bash** (dari Start menu), lalu pastikan keempatnya menjawab:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml \
-  up -d --no-deps --force-recreate gateway gateway-b
+git --version; python --version; aws --version; k6 version
 ```
 
-> Jangan lupa mengembalikan nilai ini setelah demo (lihat bagian 6).
-> Tanpa langkah ini, hasil k6 akan didominasi 429 — seperti yang terjadi
-> saat rehearsal lokal (42.892 dari 42.913 request → 429).
+- `python: command not found` atau diarahkan ke Microsoft Store: pasang Python dari python.org dan
+  centang **Add python.exe to PATH**.
+- `k6` atau `aws` tidak ditemukan: tutup semua jendela Git Bash, buka lagi.
 
-### 2.2 Buat token demo
+Lalu ambil kode:
 
-Di EC2:
+```bash
+cd ~
+git clone https://github.com/satyawirapramudita/Final_Project_Scalable
+```
+
+Semua perintah di bawah dijalankan di **Git Bash**, dari satu laptop yang sama.
+
+---
+
+## B. Hari demo (tanpa AI)
+
+Mulai **minimal 40 menit** sebelum giliran: deploy ±11 menit, kamus ±2 menit, uji <10 menit, sisanya
+cadangan. Sesi sandbox baru = server baru, jadi langkah B1–B5 diulang tiap sesi.
+
+### B1. Nyalakan lab dan salin kredensial
+
+1. Halaman lab: **Start Lab**, tunggu lampu **AWS** hijau. Lihat timer: butuh lebih dari 1 jam.
+2. Klik **AWS Details** → **AWS CLI: Show** → salin seluruh isinya.
+3. Di Git Bash:
+   ```bash
+   mkdir -p ~/.aws && cat > ~/.aws/credentials
+   ```
+   Tempel (klik kanan → Paste), tekan **Enter**, lalu **Ctrl+D**.
+4. Periksa:
+   ```bash
+   export AWS_DEFAULT_REGION=us-east-1
+   aws sts get-caller-identity
+   ```
+   Harus menampilkan nomor akun, bukan error.
+
+Kredensial itu memberi akses ke akun lab-mu: jangan dikirim di chat dan jangan di-commit.
+
+### B2. Siapkan repo
 
 ```bash
 cd ~/Final_Project_Scalable
-JWT_SECRET=$(grep '^JWT_SECRET=' .env | cut -d= -f2-)
-PYTHONPATH=. python scripts/mint_token.py 99 tester > ~/demo_token.txt
-cat ~/demo_token.txt   # mulai dengan eyJhbGci...
+git pull
+rm -rf ~/.poetify-sandbox     # HANYA bila sesi lab ini baru (server sesi lama sudah terhapus)
 ```
 
-Token ini untuk `user_id=99` — pastikan user 99 punya data (seed/atau buat akun demo).
-
-### 2.3 Cari 1 ID puisi untuk wordcloud
+### B3. Deploy (±11 menit)
 
 ```bash
-TOKEN=$(cat ~/demo_token.txt)
-BASE=http://localhost   # di EC2 (port 80), atau pakai ALB dari luar
-curl -s -o /dev/null -w '%{http_code}\n' \
-  -H "Authorization: Bearer $TOKEN" "$BASE/api/wordcloud/1"
+bash deploy/sandbox/deploy.sh buat
 ```
 
-Harus **200**. Kalau 404, ambil ID lain:
+- Pesan `mode group ditolak ... InvalidArgument` **normal**.
+- Berhasil bila `Smoke test` menampilkan `200` (health dan CloudFront `/`) dan `401` (dua baris `/api`).
+- Catat alamat `CloudFront : https://....cloudfront.net/`.
+- Terputus di tengah jalan: **jangan** ulangi `buat` (server jadi dobel). Ikuti "Bila terputus" di
+  [`deploy/sandbox/README.md`](../deploy/sandbox/README.md).
+
+### B4. Tunggu kamus dan cek aplikasi
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T mysql \
-  sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N -e \
-  "SELECT id FROM poem_db.puisi WHERE status=\"done\" LIMIT 3;"'
+bash deploy/sandbox/deploy.sh kbbi-status      # ulangi sampai muncul SELESAI
 ```
 
----
+Buka alamat CloudFront: daftar akun, kirim satu puisi, cari "senja", klik satu hasil.
 
-## 3. Siapkan 3 terminal (atau 3 pane tmux)
+### B5. (Opsional) Grafana di layar
 
-| Terminal | Isi | Dijalankan dari |
-|---|---|---|
-| **A — beban** | k6 soak 90 detik ke `BASE_URL` | EC2 (paling akurat) atau laptop |
-| **B — probe** | wordcloud tiap ~1 detik | EC2 atau laptop |
-| **C — injeksi** | `stop poem` → 30 dtk → `start poem` | **EC2 (SSH)** — wajib |
-
-`BASE` yang dipakai:
-
-- Demo via **CloudFront/ALB**: `BASE=https://<CF-DOMAIN>` (paling realistis; juga
-  membuktikan origin group failover bila dipakai).
-- Demo langsung ke **ALB**: `BASE=http://<ALB-DNS>`.
-- Di dalam EC2: `BASE=http://localhost` (port 80 dari `docker-compose.prod.yml`).
-
-Untuk demo kelas, **jalankan k6 di EC2** supaya latensinya jujur (tidak tercampur
-RTT dari Indonesia, yang bisa ±200 ms dan membuat p95 tidak bisa dibandingkan SLO).
-
----
-
-## 4. Timeline 5 menit
-
-| Waktu | Aksi | Yang diperlihatkan ke kelas |
-|---|---|---|
-| 0:00–0:20 | Baseline: `docker compose ps`, probe 200, search 200 | Stack sehat |
-| 0:20–0:50 | Mulai k6 (Terminal A) + probe (Terminal B) | Beban berjalan, angka mengalir |
-| 0:50–1:20 | `docker compose stop poem` (Terminal C) | Probe berubah `503`, search tetap `200` |
-| 1:20–1:50 | `docker compose start poem` | Probe kembali `200` — catat waktu pulih |
-| 1:50–2:10 | k6 selesai → tampilkan ringkasan | Throughput, p95, error search |
-| 2:10–5:00 | Presentasi tabel + kesimpulan | Tabel risiko + RTO |
-
----
-
-## 5. Perintah persiterminalan
-
-### Terminal A — beban search (mulai di 0:20)
+Unduh `labsuser.pem` dari **AWS Details**, lalu di jendela Git Bash **kedua**:
 
 ```bash
 cd ~/Final_Project_Scalable
-TOKEN=$(cat ~/demo_token.txt)
-BASE=http://localhost    # atau ALB/CloudFront bila dari luar
-
-docker run --rm -i \
-  -v "$PWD/loadtest:/scripts:ro,z" \
-  -e BASE_URL="$BASE" -e TOKEN="$TOKEN" \
-  -e PROFILE=soak -e VUS=20 -e SOAK_DURATION=90s \
-  grafana/k6 run /scripts/aws_stress.js
+bash deploy/sandbox/deploy.sh info                 # lihat IP publik app-1
+ssh -i ~/Downloads/labsuser.pem -L 3000:localhost:3000 ec2-user@<IP publik app-1>
+grep GRAFANA ~/.poetify-sandbox/secrets.env        # password (jalankan di jendela lain)
 ```
 
-Jika image `grafana/k6` belum ada: `docker pull grafana/k6`.
+Buka http://localhost:3000, login `admin`. Lewati saja bila tidak lancar; uji tidak membutuhkannya.
+(Grafana di sandbox belum pernah dicoba saat gladi.)
 
-Catatan: di SELinux aktif (Ubuntu tidak), flag `:z` tetap aman dipakai.
-
-### Terminal B — probe wordcloud (mulai di 0:20)
-
-```bash
-TOKEN=$(cat ~/demo_token.txt)
-BASE=http://localhost
-
-timeout 150 bash -c '
-while true; do
-  ts=$(date +%H:%M:%S)
-  code=$(curl -s -o /dev/null -w "%{http_code}" -m 8 \
-    -H "Authorization: Bearer '"$TOKEN"'" \
-    "$'"$BASE"'/api/wordcloud/1")
-  echo "$ts wordcloud=$code"
-  sleep 1
-done' | tee ~/wordcloud-demo.log
-```
-
-Saat poem mati, tiap probe menunggu connect-timeout gateway (3 dtk), jadi jeda
-antara baris 503 bisa ~4–5 detik — itu normal dan justru memperlihatkan timeout.
-
-### Terminal C — injeksi (mulai di 0:50)
+### B6. Jalankan stress test (giliranmu, <10 menit)
 
 ```bash
 cd ~/Final_Project_Scalable
-date +%H:%M:%S                      # catat waktu injeksi
-docker compose -f docker-compose.yml -f docker-compose.prod.yml stop poem
-sleep 30
-date +%H:%M:%S                      # catat waktu pulihkan
-docker compose -f docker-compose.yml -f docker-compose.prod.yml start poem
+bash loadtest/kelas.sh
 ```
 
----
+Hanya itu. Skrip menyiapkan token, menaikkan rate limit, menjalankan semua fase, mematikan dan
+menyalakan poem, menunggu antrean terkuras, mencetak ringkasan, lalu mengembalikan pengaturan.
 
-## 6. Hasil yang diharapkan (template tabel demo)
+- ±1½ menit pertama hanya persiapan. Boleh dijalankan sedikit sebelum giliran.
+- Layar k6 diam selama beban berjalan; jelaskan fase memakai tabel di bagian 1. Baris `INJEKSI` dan
+  `PULIHKAN` muncul sendiri.
+- **Jalankan sekali saja per deploy.** Sisa data uji membuat run berikutnya lebih lambat.
+- Jangan unduh atau streaming apa pun di laptop: beban dikirim dari laptop ini.
 
-Ganti angka dengan hasil live. Contoh dari rehearsal lokal:
+Hasil tersimpan di `loadtest/results/kelas-<waktu>/` (`ringkasan.txt` untuk ditunjukkan).
 
-| Skenario | Beban | Hasil | Dampak | Mitigasi |
-|---|---|---|---|---|
-| Baseline | 20 VU search, 90 dtk | p95 … ms, error 0% | — | — |
-| Poem mati ±30 dtk | beban sama + probe | search tetap 200; wordcloud/kbbi 503 ±32 dtk | Data turunan tak terjangkau; poem = hard dependency (`auth_request`) | Replika poem (2, sudah ada), timeout gateway 3 dtk, cache stale, breaker/fallback |
+### B7. Setelah demo
 
-**Satu kalimat kesimpulan demo:**
+1. Salin folder `loadtest/results/kelas-<waktu>/` dan screenshot Grafana **sebelum** sesi habis.
+2. Hemat kredit: `bash deploy/sandbox/deploy.sh hapus` (±5 menit), atau akhiri sesi lab.
 
-> "Saat poem mati, wordcloud dan kbbi otomatis 503 dalam < 1 detik karena
-> pemeriksaan akses `auth_request` di gateway, sementara search tetap 200 di
-> beban yang sama. Setelah poem dinyalakan lagi, layanan pulih dalam ±X detik
-> tanpa restart manual. Ini menunjukkan poem adalah titik kritis untuk data
-> turunan, dan mitigasinya adalah replika + health check + cache stale."
+### Rekaman cadangan
 
----
-
-## 7. Bonus 60 detik (jika waktu cukup): failover gateway-b
-
-Deployment `docker-compose.prod.yml` menjalankan dua gateway: `gateway` (port 80)
-dan `gateway-b` (port 81), dihubungkan CloudFront origin group (lihat
-`deploy-aws-tutorial.md` bagian 10.4b). Demo singkatnya:
-
-```bash
-# beban tetap jalan (Terminal A), lalu:
-docker compose -f docker-compose.yml -f docker-compose.prod.yml stop gateway
-# amati: CloudFront otomatis memakai gateway-b; /api/search tetap 200
-docker compose -f docker-compose.yml -f docker-compose.prod.yml start gateway
-```
-
-Yang dibuktikan: **SPOF gateway** (titik kritis 1) sudah dimitigasi dengan 2
-instans + failover di sisi CloudFront. Batasan: origin failover CloudFront hanya
-berlaku untuk GET/HEAD/OPTIONS — untuk POST, andalkan retry + Idempotency-Key
-(di frontend sudah otomatis).
+Saat gladi, rekam layar selama B6 (Windows: **Win+Shift+R**, atau OBS) dan simpan videonya. Putar bila
+deploy atau jaringan bermasalah di kelas, dan katakan bahwa itu rekaman gladi.
 
 ---
 
-## 8. Jika ada yang tidak sesuai rencana (cadangan)
+## C. Alternatif: dengan asisten AI
+
+Butuh asisten yang **bisa menjalankan perintah di laptop** (mis. Claude Code), bukan chatbot di
+browser. Alat di bagian A tetap diperlukan. Buka folder repo di asisten, **Start Lab**, lalu kirim:
+
+> Ini kredensial AWS Sandbox saya: (tempel dari AWS Details → AWS CLI).
+> Baca docs/Demo-Kelas-AWS.md dan deploy/sandbox/README.md. Deploy Poetify (jangan buat server
+> ganda), tunggu KBBI selesai, beri tahu alamat CloudFront, lalu tunggu perintah saya sebelum
+> menjalankan loadtest/kelas.sh. Setelah uji, jelaskan hasilnya.
+
+Berikan kredensial hanya ke alat yang kamu percaya dan pastikan aturan kelas mengizinkan. Tetap
+pelajari bagian B: bila asistennya gagal atau internetnya bermasalah, kamu yang menjalankan.
+
+---
+
+## 1. Fase uji
+
+Beban: 50% search, 20% daftar puisi, 10% wordcloud, 10% kbbi, **10% submit puisi** (submit melewati
+RabbitMQ ke nlp-worker, wordcloud, kbbi-linker, dan search).
+
+| Waktu beban | Fase | Beban (VU) | Yang dijawab |
+|---|---|---|---|
+| 0:00–0:30 | `baseline` | 10 | Kondisi normal |
+| 0:30–3:50 | `ramp-20` … `ramp-320` | 20, 40, 80, 160, 320 (±40 dtk per tahap) | Kapan mulai kewalahan, berapa yang sanggup |
+| 3:50–4:10 | `jeda` | 10 | |
+| 4:10–5:20 | `spike` | melonjak ke 300 | Tahan lonjakan mendadak? |
+| 5:20–6:00 | `pulih` | 10 | Berapa lama pulih |
+| 6:00–7:30 | `gagal` | 20; poem di app-1 mati ±30 dtk mulai ±6:20 | Dampak crash dan lama pulih |
+
+- **VU (virtual user)** mengirim request terus-menerus tanpa jeda, jauh lebih agresif daripada orang
+  sungguhan; jangan disebut "320 pengguna asli".
+- VU bergantian memakai **50 identitas uji** (token dibuat langsung, bukan akun terdaftar), jadi login
+  dan registrasi tidak ikut diuji. Puisi contoh milik user 99.
+- Tidak diuji: login, ubah/hapus puisi, matinya node RabbitMQ atau gateway.
+- Rate limit gateway app-1 dinaikkan selama uji; tanpa itu yang terukur adalah limiter.
+
+---
+
+## 2. Cara membaca hasil
+
+- **Mulai kewalahan:** tahap ramp pertama dengan p95 > 1000 ms atau error > 1%. Ambangnya bukan SLO
+  300 ms karena k6 di laptop ikut mengukur perjalanan ke `us-east-1`; sebutkan itu saat demo.
+- **Pulih dari spike:** sejak fase `pulih` sampai p95 dan error kembali di bawah ambang. Angka ±10
+  detik berarti pulih begitu beban turun (penurunannya sendiri 10 detik).
+- **Poem dimatikan:** daftar/submit puisi, wordcloud, dan kbbi gagal sementara (poem = hard dependency
+  lewat `auth_request`), search tetap 200. Lama error mencakup jeda pengiriman perintah dan start poem.
+- **Integritas:** semua puisi yang tersimpan sudah `done`, outbox 0, antrean 0, DLQ 0.
+- Bila CPU server rendah tetapi throughput mentok, yang mentok laptop atau jaringannya.
+
+**Satu kalimat kesimpulan demo** (isi dengan angka run-mu sendiri):
+
+> "Sistem masih sehat sampai … VU (… req/s) dan mulai kewalahan di … VU; setelah lonjakan 300 VU
+> pulih dalam … detik. Saat poem mati, fitur yang bergantung padanya gagal ±… detik sementara search
+> tetap jalan, dan tidak ada puisi yang hilang."
+
+---
+
+## 3. Angka gladi (28 Nov 2026)
+
+| | Run 1 (deploy baru, versi 9 menit) | Run 2 (data sisa run 1) | Run 3 (deploy baru) |
+|---|---|---|---|
+| Masih sehat | 80 VU | 40 VU | 80 VU |
+| Mulai kewalahan | 160 VU | 80 VU | 160 VU |
+| Throughput tertinggi | 227 req/s | 158 req/s | 217 req/s |
+| p95 search, seluruh uji | 0,56 s | 5,7 s | 0,48 s |
+| Pulih dari spike | ±10 s | ±10 s | ±10 s |
+| Poem mati: lama error / search gagal | 49 s / 0 | 48 s / 0 | 48 s / 0 |
+| Data tertinggal | tidak ada | tidak ada | tidak ada |
+| Total waktu skrip | 11 menit | 9 menit 22 detik | 9 menit 17 detik |
+
+- **Bottleneck pertama: layanan poem** (daftar dan submit melambat; wordcloud/kbbi ikut karena bertanya
+  ke poem). `GET /api/poems` mengembalikan semua puisi pengguna (tanpa paginasi); diduga ikut
+  berkontribusi, belum dibuktikan.
+- **Search melambat setelah ribuan puisi menumpuk** (run 2; p95 di server 5,0 s menurut Prometheus,
+  jadi bukan jaringan). Dari satu run, penyebabnya belum diteliti.
+- Satu kali ukur per kondisi; harapkan angka yang sedikit berbeda.
+
+---
+
+## 4. Jika ada yang tidak sesuai rencana
 
 | Kejadian | Reaksi cepat |
 |---|---|
-| k6 menunjukkan banyak 429 | Rate limit belum dinaikkan; sampaikan ini sebagai temuan + tunjukkan log gateway `limit_req` |
-| wordcloud tidak 503 saat poem mati | Cek `docker compose ps poem`; pastikan SEMUA replika mati (`stop poem` menghentikan keduanya) |
-| wordcloud 404 (bukan 503) | ID puisi salah/tidak ada; pakai ID dari bagian 2.3 |
-| k6 gagal start (image tidak ada) | `docker pull grafana/k6`; atau jalankan dari laptop ke ALB |
-| Recovery lambat (> 30 dtk) | Tunggu; autoheal + healthcheck butuh beberapa detik; catat RTO apa adanya |
-| Demo via CloudFront dan 502 | Cek Security Group port 80/81; cek `curl http://<EIP>/health` |
+| `k6 tidak ditemukan` | Buka ulang Git Bash; atau `K6=/path/ke/k6.exe bash loadtest/kelas.sh` |
+| `ExpiredToken` / `UnauthorizedOperation` | Kredensial lama: ulangi B1 (sesi lab masih hidup?) |
+| `/health tidak menjawab` | Sesi lab habis atau IP berubah; cek `bash deploy/sandbox/deploy.sh info` |
+| Banyak 429 di tabel | Rate limit gagal dinaikkan; cek `/opt/poetify/.env` di app-1 |
+| Skrip dihentikan (Ctrl+C) | Skrip memulihkan poem dan rate limit sendiri; pastikan dengan `bash deploy/sandbox/deploy.sh jalankan app-1 'docker ps'` |
+| Antrean belum terkuras setelah 5 menit | Catat sebagai temuan (analisis tertinggal di belakang submit) |
+| Waktu demo tidak cukup | Putar rekaman gladi |
 
-**Aturan emas:** apa pun yang gagal, jadikan temuan. Laporan tugas ini justru
-paling kuat bila kegagalan terukur, bukan disembunyikan.
+**Aturan emas:** apa pun yang gagal, jadikan temuan, jangan disembunyikan.
 
 ---
 
-## 9. Setelah demo (wajib)
+## 5. Tambahan manual (bila ditanya)
+
+**Mematikan poem sendiri.** `docker compose start` gagal di server aplikasi ("missing dependency
+rabbit-2"), jadi nyalakan dengan `up -d --no-deps`:
 
 ```bash
-# 1) Kembalikan rate limit produksi
-#    (edit .env: API_RATE_LIMIT=200r/s, API_BURST=400 bila lewat CloudFront)
-docker compose -f docker-compose.yml -f docker-compose.prod.yml \
-  up -d --no-deps --force-recreate gateway gateway-b
-
-# 2) Verifikasi sehat
-curl -s http://localhost/health
-docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
-
-# 3) Simpan bukti
-cat ~/wordcloud-demo.log          # salin ke laporan
-# screenshot k6 summary + Grafana (SSH tunnel: -L 3001:127.0.0.1:3001)
+C='cd /opt/poetify && docker compose -f docker-compose.yml -f deploy/sandbox/app.yml'
+bash deploy/sandbox/deploy.sh jalankan app-1 "$C stop poem"
+bash deploy/sandbox/deploy.sh jalankan app-1 "$C up -d --no-deps poem"
 ```
 
-Untuk menghemat kredit Learner Lab: hentikan EC2 (dan RDS bila dipakai) setelah
-sesi, atau matikan instance saat tidak dipakai. Data aman di EBS/volume.
+**Failover gateway (±60 detik, di luar skrip).**
+
+```bash
+bash deploy/sandbox/deploy.sh jalankan app-1 'docker stop puisi-gateway'
+# buka/cari di aplikasi lewat alamat CloudFront: pencarian tetap jalan (dilayani app-2)
+bash deploy/sandbox/deploy.sh jalankan app-1 'docker start puisi-gateway'
+```
+
+Yang dibuktikan: SPOF gateway dimitigasi dengan 2 gateway di mesin berbeda + failover CloudFront.
+Batasan: hanya GET/HEAD/OPTIONS; di sandbox, POST selalu ke app-1 (jadi login dan submit gagal selama
+gateway-a mati).
 
 ---
 
-## 10. Yang dipakai untuk Tabel Analisis Risiko
+## 6. Yang dipakai untuk Tabel Analisis Risiko
 
 Setiap baris tabel risiko kini punya bukti:
 
 | Titik kritis | Bukti (dari mana) | Dampak | Solusi terpasang |
 |---|---|---|---|
 | Gateway (SPOF) | Rehearsal lokal: kill → outage ±18 dtk; live AWS: origin group gateway-b | Total outage tanpa mitigasi | 2 gateway + CloudFront failover, autoheal |
-| Sync path (poem) | **Demo live**: wordcloud/kbbi 503 ±32 dtk, search tetap 200 | Data turunan tak terjangkau | Replika poem, timeout 3 dtk, cache stale, breaker search |
+| Sync path (poem) | **Demo live** (`kelas.sh`); gladi 28 Nov: error ±48 dtk, search tetap 200 | Data turunan tak terjangkau | Replika poem, timeout 3 dtk, cache stale, breaker search |
 | Async (RabbitMQ) | Rehearsal: broker mati → outbox 5 pending → drain 0 | Tulis tetap sukses, async tertunda | Outbox + publisher confirms + quorum queue |
 | Data (MySQL) | Rehearsal: kill → RTO ±6 dtk, 5xx window | API DB gagal | Backup harian + S3, pool ping=1 |
 | Data (Redis) | Rehearsal: stop → idempotency fail-open → 2 baris | Duplikasi saat Redis mati | Breaker Redis; catat gap → Sentinel |
