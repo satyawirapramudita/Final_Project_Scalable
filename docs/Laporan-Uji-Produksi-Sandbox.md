@@ -309,7 +309,7 @@ SELECT COUNT(*) FROM poem_db.puisi WHERE judul LIKE 'Uji Quorum%' AND status='do
 
 ---
 
-## 8. Baseline beban (soak) — untuk pembanding demo
+## 8. Baseline beban (soak)
 
 k6 `aws_stress.js` profil `soak`, 20 VU × 60 dtk, via CloudFront:
 
@@ -373,8 +373,8 @@ bash deploy/sandbox/deploy.sh jalankan app-1 \
 # Uji 5: k6 submit-duplikat & key-bentrok dari laptop (+ COUNT(*) DB)
 ```
 
-Perintah lengkap per terminal: [`Demo-Kelas-AWS.md`](Demo-Kelas-AWS.md) dan
-[`Stress-Test-AWS.md`](Stress-Test-AWS.md).
+Perintah lengkap: [`Stress-Test-AWS.md`](Stress-Test-AWS.md). Stress test demo kelas bukan dari
+laporan ini; lihat [`Demo-Kelas-AWS.md`](Demo-Kelas-AWS.md).
 
 ---
 
