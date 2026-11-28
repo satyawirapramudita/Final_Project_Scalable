@@ -199,25 +199,20 @@ RabbitMQ ke nlp-worker, wordcloud, kbbi-linker, dan search).
 
 ---
 
-## 3. Angka gladi (28 Nov 2026)
+## 3. Angka gladi (28 Nov 2026, deploy baru)
 
-| | Run 1 (deploy baru, versi 9 menit) | Run 2 (data sisa run 1) | Run 3 (deploy baru) |
-|---|---|---|---|
-| Masih sehat | 80 VU | 40 VU | 80 VU |
-| Mulai kewalahan | 160 VU | 80 VU | 160 VU |
-| Throughput tertinggi | 227 req/s | 158 req/s | 217 req/s |
-| p95 search, seluruh uji | 0,56 s | 5,7 s | 0,48 s |
-| Pulih dari spike | ±10 s | ±10 s | ±10 s |
-| Poem mati: lama error / search gagal | 49 s / 0 | 48 s / 0 | 48 s / 0 |
-| Data tertinggal | tidak ada | tidak ada | tidak ada |
-| Total waktu skrip | 11 menit | 9 menit 22 detik | 9 menit 17 detik |
+| | Hasil |
+|---|---|
+| Masih sehat | 80 VU |
+| Mulai kewalahan | 160 VU |
+| Throughput tertinggi | 217 req/s |
+| Pulih dari spike | ±10 s |
+| Poem mati: lama error / search gagal | 48 s / 0 |
+| Data tertinggal | tidak ada |
+| Total waktu skrip | 9 menit 17 detik |
 
-- **Bottleneck pertama: layanan poem** (daftar dan submit melambat; wordcloud/kbbi ikut karena bertanya
-  ke poem). `GET /api/poems` mengembalikan semua puisi pengguna (tanpa paginasi); diduga ikut
-  berkontribusi, belum dibuktikan.
-- **Search melambat setelah ribuan puisi menumpuk** (run 2; p95 di server 5,0 s menurut Prometheus,
-  jadi bukan jaringan). Dari satu run, penyebabnya belum diteliti.
-- Satu kali ukur per kondisi; harapkan angka yang sedikit berbeda.
+Bottleneck pertama: layanan poem. Rincian: [`Laporan-Stress-Test-Sandbox.md`](Laporan-Stress-Test-Sandbox.md).
+Satu kali uji; harapkan angka yang sedikit berbeda.
 
 ---
 
