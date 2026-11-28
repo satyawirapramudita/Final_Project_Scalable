@@ -8,6 +8,11 @@ Transformasi dari monolit stateful [Monolithic-Stateful-AWS-Deployment](https://
 > Status: auth, poem, nlp-worker, wordcloud, search, kbbi-linker, gateway, dan observability sudah
 > berjalan end-to-end. Dataset KBBI tidak disertakan (lihat bagian "Data KBBI").
 
+> **Stress test untuk demo kelas:** `bash loadtest/kelas.sh`, panduan di
+> [`docs/Demo-Kelas-AWS.md`](docs/Demo-Kelas-AWS.md). Ini satu-satunya skenario yang dipakai saat demo.
+> Skrip dan dokumen uji lain (mis. `stress_test.py`, `scale_test.py`, `Stress-Test-AWS.md`) untuk
+> keperluan lain atau laporan, bukan untuk demo.
+
 ## Arsitektur
 
 Enam layanan di belakang gateway Nginx (dua instans identik):
